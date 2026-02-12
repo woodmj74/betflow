@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "betflow"
+version = "0.0.1"
+description = "Betfair Exchange research bot platform (paper trading first)"
+requires-python = ">=3.11"
+dependencies = [
+  "python-dotenv==1.0.1",
+  "pydantic==2.9.2",
+  "requests==2.32.3",
+  "structlog==24.4.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
