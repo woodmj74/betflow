@@ -4,10 +4,19 @@ secrets/
 *.key
 *.crt
 
-# Never commit secrets
-secrets/
-*.key
-*.crt
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual envs
+.venv/
+venv/
+.envrc
+
+# OS/editor
+.DS_Store
+.vscode/
 
 # Python virtual environments
 .venv/
@@ -17,10 +26,4 @@ secrets/
 __pycache__/
 *.pyc
 
-# Python virtual environments
-.venv/
-.ENV/
-.env/
-.env.*
-__pycache__/
-*.pyc
+
