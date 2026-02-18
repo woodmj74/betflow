@@ -1,0 +1,27 @@
+profiles:
+  UK:
+    countries: ["GB", "IE"]
+    min_total_matched: 2000
+  NZ:
+    countries: ["NZ","AUS"]
+    min_total_matched: 500
+
+defaults:
+  min_runners: 8
+  max_runners: 16
+  fav_min: 1.8
+  fav_max: 8.0
+
+runner_targeting:
+  max_odds: 20
+  # In fields >= field_threshold, target the Nth runner; else use smaller_field_rank
+  field_threshold: 10
+  large_field_rank: 8
+  smaller_field_rank: 6
+  target_odds_min: 12
+  target_odds_max: 18
+  max_back_lay_spread_ticks: 2
+
+sanity_checks:
+  max_runners_under_10: 4
+  prefer_cluster_under: 5.5   # "cluster down at 5s" heuristic starter

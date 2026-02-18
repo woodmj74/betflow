@@ -185,6 +185,29 @@ class BetfairClient:
 
         return self.call_jsonrpc("SportsAPING/v1.0/listMarketCatalogue", params)
 
+    def list_market_book(
+        self,
+        market_ids: List[str],
+        price_projection: Optional[Dict[str, Any]] = None,
+        order_projection: Optional[str] = None,
+        match_projection: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Wrapper for SportsAPING/v1.0/listMarketBook.
+        Pass price_projection to request best offers, traded prices, etc.
+        """
+        params: Dict[str, Any] = {
+            "marketIds": market_ids,
+        }
+        if price_projection is not None:
+            params["priceProjection"] = price_projection
+        if order_projection is not None:
+            params["orderProjection"] = order_projection
+        if match_projection is not None:
+            params["matchProjection"] = match_projection
+
+        return self.call_jsonrpc("SportsAPING/v1.0/listMarketBook", params)
+
 
 def main() -> None:
     client = BetfairClient.from_env()
