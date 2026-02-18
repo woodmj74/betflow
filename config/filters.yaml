@@ -1,0 +1,92 @@
+# ==========================================================
+# Betflow Strategy Config
+# Strategy: Odds-band harvesting (v1)
+# ==========================================================
+
+version: 1.0
+
+# ----------------------------------------------------------
+# REGIONS / MARKET SCOPE
+# Defines which countries/regions we will consider, and the
+# typical minimum liquidity threshold for each.
+#
+# Notes:
+# - countryCodes use Betfair market country codes (GB, IE, AU, NZ, ZA, etc.)
+# - liquidity_min is a hard gate for "totalMatched"
+# ----------------------------------------------------------
+scope:
+  regions:
+    UK_IRE:
+      country_codes: ["GB", "IE"]
+      liquidity_min: 2000
+
+    AUS:
+      country_codes: ["AU"]
+      liquidity_min: 1000
+
+    NZ:
+      country_codes: ["NZ"]
+      liquidity_min: 500
+
+    RSA:
+      country_codes: ["ZA"]
+      liquidity_min: 300
+
+  # If true, reject markets not in any region above.
+  reject_out_of_scope: true
+
+
+# ----------------------------------------------------------
+# MARKET ELIGIBILITY (variance control)
+# ----------------------------------------------------------
+market:
+  field_size:
+    min: 7
+    max: 16
+
+  compression:
+    # Reject overly compressed markets (too many short-priced runners)
+    # Example: if more than 4 runners are priced under 10, skip.
+    under_odds: 10.0
+    max_count: 4
+
+
+# ----------------------------------------------------------
+# RUNNER SELECTION (odds-first)
+# ----------------------------------------------------------
+runner:
+  odds_band:
+    min: 12.0     # hard gate
+    max: 18.0     # hard gate
+
+  preferred_odds: 14.0   # scoring preference, not a gate
+
+  spread:
+    max_ticks: 2          # hard gate
+
+  rank_buffer:
+    # Avoid favourites and the extreme tail.
+    min_rank: 5
+    max_rank: 10
+
+
+# ----------------------------------------------------------
+# STRUCTURAL PROBABILITY GUARD RAILS
+# ----------------------------------------------------------
+probability:
+  top_cluster:
+    count: 4
+    min_total_implied: 0.65
+    max_total_implied: 0.85
+
+  uniform_check:
+    # candidate_implied <= uniform_probability * multiplier
+    multiplier: 0.75
+
+
+# ----------------------------------------------------------
+# RISK MODEL (future automation hooks)
+# ----------------------------------------------------------
+risk:
+  min_stake: 1.0
+  max_liability: 20.0
