@@ -1,0 +1,5 @@
+
+# Never commit secrets
+secrets/
+*.key
+*.crt
