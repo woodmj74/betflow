@@ -8,3 +8,11 @@ secrets/
 secrets/
 *.key
 *.crt
+
+# Python virtual environments
+.venv/
+.ENV/
+.env/
+.env.*
+__pycache__/
+*.pyc
