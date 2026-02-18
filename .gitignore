@@ -3,3 +3,8 @@
 secrets/
 *.key
 *.crt
+
+# Never commit secrets
+secrets/
+*.key
+*.crt
