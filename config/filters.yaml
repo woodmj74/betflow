@@ -1,0 +1,40 @@
+global:
+  # How far ahead we search to find the "next N races"
+  horizon_hours: 48
+
+  # How many races (by start time) we finally print
+  take: 10
+
+  defaults:
+    runner_count:
+      min: 7
+      max: 16
+
+    # If a region doesn't specify liquidity_min, use this
+    liquidity_min: 2000
+
+regions:
+  GB:
+    name: "Great Britain"
+    market_countries: ["GB"]
+    liquidity_min: 3000
+
+  IE:
+    name: "Ireland"
+    market_countries: ["IE"]
+    liquidity_min: 2000
+
+  AU:
+    name: "Australia"
+    market_countries: ["AU"]
+    liquidity_min: 1500
+
+  NZ:
+    name: "New Zealand"
+    market_countries: ["NZ"]
+    liquidity_min: 1000
+
+  ZA:
+    name: "South Africa"
+    market_countries: ["ZA"]
+    liquidity_min: 500

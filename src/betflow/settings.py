@@ -74,3 +74,7 @@ class Settings:
             betfair_cert_crt=cert_crt_path,
             betfair_cert_key=cert_key_path,
         )
+
+
+# Singleton-style settings instance (loaded once on import)
+settings = Settings.load()
