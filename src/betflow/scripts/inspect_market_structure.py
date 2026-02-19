@@ -6,11 +6,11 @@ from typing import Any, Dict, Optional
 from betflow.betfair.client import BetfairClient
 from betflow.filter_config import load_filter_config, FilterConfig
 
-from betflow.analysis.structure_metrics import (
+from betflow.markets.structure_metrics import (
     build_runner_ladders,
     compute_market_structure_metrics,
 )
-from betflow.analysis.market_rules import evaluate_market_rules
+from betflow.markets.market_rules import evaluate_market_rules
 
 
 def _fmt_dt(iso: str) -> str:
