@@ -1,44 +1,38 @@
 from __future__ import annotations
 
-from betflow.logging import configure_logging, get_logger
-from betflow.settings import Settings
 from betflow.betfair.client import BetfairClient
+from betflow.logging import configure_logging
+from betflow.settings import settings
 
 
 def main() -> int:
-    settings = Settings.load()
     configure_logging(settings.env)
 
-    log = get_logger("script.test_connection")
+    print("\n== Betflow Proof: Connection Smoke Test ==")
 
-    # Don’t print secrets; just sanity
-    log.info(
-        "env.loaded",
-        env=settings.env,
-        app_key_len=len(settings.betfair_app_key),
-        cert_crt=str(settings.betfair_cert_crt),
-        cert_key=str(settings.betfair_cert_key),
-        username=settings.betfair_username,
-    )
+    client = BetfairClient()
 
-    client = BetfairClient(settings)
-
-    log.info("betfair.login.check")
+    print("\n[1] Login")
     client.login()
+    print("  ✓ login ok")
 
-    log.info("betfair.rpc.check", method="listEventTypes")
-    result = client.list_event_types()
+    print("\n[2] JSON-RPC: listEventTypes")
+    result = client.rpc("listEventTypes", {"filter": {}})
 
-    # Human-friendly output
-    count = len(result or [])
-    log.info("betfair.rpc.ok", event_types=count)
+    if not isinstance(result, list):
+        print(f"  ✗ unexpected result type: {type(result)}")
+        return 1
 
-    print("\nEvent Types (first 10):")
-    for row in (result or [])[:10]:
-        et = row.get("eventType", {})
-        print(f"  - {et.get('id','?'):>3}  {et.get('name','?')}")
+    print(f"  ✓ returned {len(result)} event types (showing first 10)\n")
+    for row in result[:10]:
+        # row shape: {"eventType":{"id":"7","name":"Horse Racing"},"marketCount":123}
+        et = (row or {}).get("eventType", {}) if isinstance(row, dict) else {}
+        et_id = et.get("id", "?")
+        et_name = et.get("name", "?")
+        mc = (row or {}).get("marketCount", "?") if isinstance(row, dict) else "?"
+        print(f"  - {et_id:>2}  {et_name:<20} (markets: {mc})")
 
-    print("\n✅ Connection looks good.")
+    print("\n✅ Connection looks good.\n")
     return 0
 
 
