@@ -2,15 +2,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 
 
 def _repo_root() -> Path:
-    # /opt/betflow/src/betflow/filter_config.py -> /opt/betflow
     return Path(__file__).resolve().parents[2]
 
+
+PathLike = Union[str, Path]
+
+
+# -----------------
+# Existing config
+# -----------------
 
 @dataclass(frozen=True)
 class RunnerCountRange:
@@ -40,10 +46,40 @@ class RegionConfig:
     runner_count: Optional[RunnerCountRange] = None
 
 
+# -----------------
+# NEW: Structure gates
+# -----------------
+
+@dataclass(frozen=True)
+class AnchorGate:
+    top_n: int
+    min_top_implied: float
+
+
+@dataclass(frozen=True)
+class SoupGate:
+    top_k: int
+    max_band_ratio: float  # if max/min <= ratio => FAIL
+
+
+@dataclass(frozen=True)
+class TierGate:
+    top_region: int
+    min_jump_ratio: float  # max adjacent ratio in top_region must be >= this
+
+
+@dataclass(frozen=True)
+class StructureGates:
+    anchor: AnchorGate
+    soup: SoupGate
+    tier: TierGate
+
+
 @dataclass(frozen=True)
 class FilterConfig:
     global_cfg: GlobalConfig
     regions: Dict[str, RegionConfig]
+    structure_gates: StructureGates
 
     def resolve_liquidity_min(self, region_code: str) -> float:
         region = self.regions[region_code]
@@ -57,9 +93,8 @@ class FilterConfig:
         countries: List[str] = []
         for r in self.regions.values():
             countries.extend(r.market_countries)
-        # preserve order but de-dupe
         seen = set()
-        out = []
+        out: List[str] = []
         for c in countries:
             if c not in seen:
                 seen.add(c)
@@ -67,12 +102,17 @@ class FilterConfig:
         return out
 
 
-def load_filter_config(path: Optional[Path] = None) -> FilterConfig:
+def load_filter_config(path: Optional[PathLike] = None) -> FilterConfig:
     if path is None:
-        path = _repo_root() / "config" / "filters.yaml"
+        path_obj = _repo_root() / "config" / "filters.yaml"
+    else:
+        path_obj = path if isinstance(path, Path) else Path(path)
+        if not path_obj.is_absolute():
+            path_obj = _repo_root() / path_obj
 
-    data = _load_yaml(path)
+    data = _load_yaml(path_obj)
 
+    # ---- global
     g = data.get("global", {})
     defaults = g.get("defaults", {})
 
@@ -91,6 +131,7 @@ def load_filter_config(path: Optional[Path] = None) -> FilterConfig:
         defaults=global_defaults,
     )
 
+    # ---- regions
     regions_raw = data.get("regions", {}) or {}
     regions: Dict[str, RegionConfig] = {}
 
@@ -103,7 +144,7 @@ def load_filter_config(path: Optional[Path] = None) -> FilterConfig:
         if isinstance(rc, dict):
             runner_range = RunnerCountRange(min=int(rc.get("min", 7)), max=int(rc.get("max", 16)))
 
-        regions[code] = RegionConfig(
+        regions[str(code)] = RegionConfig(
             code=str(code),
             name=str(r.get("name", code)),
             market_countries=list(r.get("market_countries", [])),
@@ -114,12 +155,32 @@ def load_filter_config(path: Optional[Path] = None) -> FilterConfig:
     if not regions:
         raise ValueError("No regions configured in filters.yaml")
 
-    # basic validation
     for code, region in regions.items():
         if not region.market_countries:
             raise ValueError(f"Region '{code}' has no market_countries configured")
 
-    return FilterConfig(global_cfg=global_cfg, regions=regions)
+    # ---- NEW: structure_gates (with defaults so old configs still work)
+    sg = data.get("structure_gates", {}) or {}
+    anchor_raw = sg.get("anchor", {}) or {}
+    soup_raw = sg.get("soup", {}) or {}
+    tier_raw = sg.get("tier", {}) or {}
+
+    structure_gates = StructureGates(
+        anchor=AnchorGate(
+            top_n=int(anchor_raw.get("top_n", 3)),
+            min_top_implied=float(anchor_raw.get("min_top_implied", 0.65)),
+        ),
+        soup=SoupGate(
+            top_k=int(soup_raw.get("top_k", 5)),
+            max_band_ratio=float(soup_raw.get("max_band_ratio", 1.20)),
+        ),
+        tier=TierGate(
+            top_region=int(tier_raw.get("top_region", 6)),
+            min_jump_ratio=float(tier_raw.get("min_jump_ratio", 1.25)),
+        ),
+    )
+
+    return FilterConfig(global_cfg=global_cfg, regions=regions, structure_gates=structure_gates)
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
@@ -127,18 +188,3 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
         raise FileNotFoundError(f"Filter config not found: {path}")
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
-
-
-from pathlib import Path
-from typing import Any, Dict, Union
-
-def load_filters_config(path: Union[str, Path] = Path("config/filters.yaml")) -> Dict[str, Any]:
-    """
-    Convenience wrapper used by scripts.
-    Returns the parsed filters.yaml as a plain dict.
-
-    This function intentionally delegates to the existing loader logic in this module.
-    """
-    # ---- OPTION A: if your module already has a "load_config" style function ----
-    # Replace `load_filter_config_file` below with whatever your existing function is called.
-    return load_filter_config_file(path)  # <-- CHANGE THIS LINE to your actual loader

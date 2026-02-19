@@ -43,7 +43,7 @@ regions:
 structure_gates:
   anchor:
     top_n: 3
-    min_top_implied: 0.65 # calculated as 1/back price - do the top n sum to <= top implied value to pass (ie over 65% probability)
+    min_top_implied: 0.65 # calculated as 1/back price - do the top n sum to >= top implied value to pass (ie over 65% probability)
 
   soup:
     top_k: 5
