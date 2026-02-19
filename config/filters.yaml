@@ -52,3 +52,9 @@ structure_gates:
   tier:
     top_region: 6
     min_jump_ratio: 1.25   # max adjacent ratio in top_region must be >= this (ie a gap between clustered pricing)
+
+
+horse_selection:
+  min_odds: 12.0
+  max_odds: 18.0
+  max_spread: 2.0

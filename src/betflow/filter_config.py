@@ -76,10 +76,18 @@ class StructureGates:
 
 
 @dataclass(frozen=True)
+class HorseSelectionFilters:
+    min_odds: float
+    max_odds: float
+    max_spread: float
+
+
+@dataclass(frozen=True)
 class FilterConfig:
     global_cfg: GlobalConfig
     regions: Dict[str, RegionConfig]
     structure_gates: StructureGates
+    horse_selection: HorseSelectionFilters
 
     def resolve_liquidity_min(self, region_code: str) -> float:
         region = self.regions[region_code]
@@ -180,7 +188,19 @@ def load_filter_config(path: Optional[PathLike] = None) -> FilterConfig:
         ),
     )
 
-    return FilterConfig(global_cfg=global_cfg, regions=regions, structure_gates=structure_gates)
+    horse_selection_raw = data.get("horse_selection", {}) or {}
+    horse_selection = HorseSelectionFilters(
+        min_odds=float(horse_selection_raw.get("min_odds", 12.0)),
+        max_odds=float(horse_selection_raw.get("max_odds", 18.0)),
+        max_spread=float(horse_selection_raw.get("max_spread", 2.0)),
+    )
+
+    return FilterConfig(
+        global_cfg=global_cfg,
+        regions=regions,
+        structure_gates=structure_gates,
+        horse_selection=horse_selection,
+    )
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:

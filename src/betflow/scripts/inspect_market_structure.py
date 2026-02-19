@@ -11,6 +11,7 @@ from betflow.analysis.structure_metrics import (
     compute_market_structure_metrics,
 )
 from betflow.analysis.market_rules import evaluate_market_rules
+from betflow.services.horse_selection import evaluate_horse_selections
 
 
 def _fmt_dt(iso: str) -> str:
@@ -89,19 +90,32 @@ def inspect_one_market(client: BetfairClient, market_id: str, filters_path: Opti
     _print_rule_results(rule_results)
     print(f"  → MARKET {'ACCEPTED' if accepted else 'REJECTED'}")
 
+    selection_decisions = evaluate_horse_selections(ladders, cfg.horse_selection)
+
     # --- Ladder (only if accepted)
     if accepted:
         print("")
+        print("  Selection filters:")
+        print(
+            f"    odds in [{cfg.horse_selection.min_odds:.2f}–{cfg.horse_selection.max_odds:.2f}] "
+            f"and max spread {cfg.horse_selection.max_spread:.2f}"
+        )
+        print("")
         print("  Ladder (best back/lay):")
-        print("  #  Runner                           Back     Lay")
-        print("  -----------------------------------------------")
+        print("  #  Runner                           Back     Lay    Selection")
+        print("  ------------------------------------------------------------")
 
-        for idx, r in enumerate(ladders, start=1):
+        for idx, (r, s) in enumerate(zip(ladders, selection_decisions), start=1):
             num = f"{idx:02d}"
             back = f"{r.best_back:>6.2f}" if r.best_back else "   -  "
             lay = f"{r.best_lay:>6.2f}" if r.best_lay else "   -  "
+            mark = "✓" if s.eligible else "✗"
             name = (r.runner_name or "")[:30]
-            print(f"  {num} {name:<30} {back}  {lay}")
+            print(f"  {num} {name:<30} {back}  {lay}   {mark}")
+
+        accepted_selections = [s for s in selection_decisions if s.eligible]
+        print("")
+        print(f"  Candidate selections: {len(accepted_selections)}")
 
 
 def main():
