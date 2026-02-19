@@ -3,8 +3,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from betflow.markets.structure_metrics import MarketStructureMetrics
 from betflow.filter_config import FilterConfig
+from betflow.markets.structure_metrics import MarketStructureMetrics
+
+
+# ----------------------------
+# Helper models
+# ----------------------------
+
+@dataclass(frozen=True)
+class RuleResult:
+    ok: bool
+    label: str
+    detail: str
+
+
+# ----------------------------
+# Small helpers
+# ----------------------------
 
 def _get(d: dict, path: list[str], default: Any = None) -> Any:
     cur: Any = d
@@ -14,11 +30,19 @@ def _get(d: dict, path: list[str], default: Any = None) -> Any:
         cur = cur[p]
     return cur
 
+
 def _region_for_country(cfg: FilterConfig, country: str | None) -> Optional[str]:
     """
-    Map a Betfair event.countryCode (e.g. 'GB', 'IE') to a configured region code
-    by scanning cfg.regions[*].countries.
-    Returns the region code (dict key) or None if no match.
+    Map Betfair event.countryCode to a configured region code by scanning cfg.regions[*].countries.
+
+    Expects cfg.regions to be a mapping like:
+      regions:
+        UK_IRE:
+          name: "UK + Ireland"
+          countries: ["GB", "IE"]
+        AUS:
+          name: "Australia"
+          countries: ["AU"]
     """
     if not country:
         return None
@@ -28,17 +52,14 @@ def _region_for_country(cfg: FilterConfig, country: str | None) -> Optional[str]
         countries = getattr(region, "countries", None)
         if not countries:
             continue
-        # countries is expected to be a list like ["GB", "IE"]
         if cc in [c.upper() for c in countries]:
             return region_code
     return None
 
-@dataclass(frozen=True)
-class RuleResult:
-    ok: bool
-    label: str
-    detail: str
 
+# ----------------------------
+# Rule evaluation
+# ----------------------------
 
 def evaluate_market_rules(
     *,
@@ -47,13 +68,22 @@ def evaluate_market_rules(
     metrics: MarketStructureMetrics,
     cfg: FilterConfig,
 ) -> Tuple[bool, Optional[str], List[RuleResult]]:
+    """
+    Evaluate market-level eligibility.
+    Returns:
+      accepted: bool
+      region_code: Optional[str]
+      results: list of RuleResult with pass/fail + human details
+    """
     results: List[RuleResult] = []
-    cfg_dict = cfg.dict() if hasattr(cfg, "dict") else cfg.__dict__
 
+    # Support both dataclass and pydantic-ish configs
+    cfg_dict = cfg.dict() if hasattr(cfg, "dict") else cfg.__dict__
 
     country = (market_catalogue.get("event", {}) or {}).get("countryCode")
     region_code = _region_for_country(cfg, country)
 
+    # --- structure gate parameters (from config)
     anchor_top_n = int(_get(cfg_dict, ["structure_gates", "anchor", "top_n"], 3))
     anchor_min_top_implied = float(_get(cfg_dict, ["structure_gates", "anchor", "min_top_implied"], 0.65))
 
@@ -62,7 +92,6 @@ def evaluate_market_rules(
 
     tier_top_region = int(_get(cfg_dict, ["structure_gates", "tier", "top_region"], 6))
     tier_min_jump_ratio = float(_get(cfg_dict, ["structure_gates", "tier", "min_jump_ratio"], 1.25))
-
 
     # --- Country / region mapping
     country_ok = False
@@ -75,7 +104,7 @@ def evaluate_market_rules(
         results.append(RuleResult(True, "Country", f"{country} -> {region_code} ({region_name})"))
         country_ok = True
 
-    # --- Runner count & liquidity
+    # --- Runner count & liquidity (region driven)
     runner_ok = False
     liquidity_ok = False
     if region_code:
@@ -91,19 +120,19 @@ def evaluate_market_rules(
         results.append(RuleResult(False, "Field size", "skipped (no region resolved)"))
         results.append(RuleResult(False, "Liquidity", "skipped (no region resolved)"))
 
-
-    # --- Structure gates (already computed in metrics) ---
+    # --- Structure gates (computed in metrics)
+    # Anchor: sum implied probs of topN favourites
     anchor_ok = metrics.top_n_implied_sum >= anchor_min_top_implied
     results.append(
         RuleResult(
             ok=anchor_ok,
             label=f"Anchor (top{anchor_top_n} implied)",
-            detail=f"{metrics.top_n_implied_sum:.3f} >= {anchor_min_top_implied:.3f}",
+            detail=f"{metrics.top_n_implied_sum:.3f} ≥ {anchor_min_top_implied:.3f}",
         )
     )
 
-    # Soup gate: FAIL if max/min in topK is <= threshold (too many plausible winners)
-    # Therefore PASS if ratio > threshold.
+    # Soup: FAIL if max/min within topK <= threshold (too many plausible winners)
+    # So PASS if ratio > threshold.
     soup_ok = metrics.soup_band_ratio > soup_max_band_ratio
     results.append(
         RuleResult(
@@ -113,12 +142,13 @@ def evaluate_market_rules(
         )
     )
 
+    # Tier: require some jump between adjacent prices in the top region
     tier_ok = metrics.tier_max_adjacent_ratio >= tier_min_jump_ratio
     results.append(
         RuleResult(
             ok=tier_ok,
             label=f"Tier (max adjacent jump top{tier_top_region})",
-            detail=f"{metrics.tier_max_adjacent_ratio:.3f} >= {tier_min_jump_ratio:.3f}",
+            detail=f"{metrics.tier_max_adjacent_ratio:.3f} ≥ {tier_min_jump_ratio:.3f}",
         )
     )
 
