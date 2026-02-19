@@ -1,3 +1,74 @@
+# Betflow — STATE
+
+Last updated: 2026-02-19 (Europe/London)
+
+---
+
+## Current Phase
+
+Phase 2 — Market structure inspection + market-level gating.
+
+We are currently in **Mode B (Architecture cleanup)** but very close to returning to Mode A.
+
+---
+
+## Green Baseline (What Works)
+
+### Connectivity
+- Betfair login working via `BetfairClient()`
+- RPC calls returning valid MarketCatalogue + MarketBook
+
+### Canonical Modules
+
+#### `betflow.markets.structure_metrics`
+- `build_runner_ladders(market_catalogue, market_book)`
+- `compute_market_structure_metrics(ladders, ...)`
+- `MarketStructureMetrics`
+- Pure module (no BetfairClient, no CLI logic)
+
+#### `betflow.markets.market_rules`
+- `evaluate_market_rules(...)`
+- Country → region mapping via `market_countries`
+- Region overrides for:
+  - runner count
+  - liquidity minimum
+- Structure gates:
+  - Anchor (top N implied sum)
+  - Soup (top K band ratio)
+  - Tier (max adjacent jump)
+
+#### `betflow.scripts.inspect_market_structure`
+- Prints:
+  - `[MARKET]`
+  - `[VALIDATION]`
+  - `[LADDER]` (always, regardless of acceptance)
+  - `[DECISION]`
+- Ladder includes:
+  - cloth number (if available)
+  - best back
+  - best lay
+  - spread ticks
+
+---
+
+## Proof Commands (Baseline)
+
+Run from repo root:
+
+```bash
+# Import sanity
+python -c "from betflow.markets.structure_metrics import build_runner_ladders, compute_market_structure_metrics, MarketStructureMetrics; from betflow.markets.market_rules import evaluate_market_rules; print('imports ok')"
+
+# Connection smoke test
+python -m betflow.scripts.test_connection
+
+# Structure inspect
+python -m betflow.scripts.inspect_market_structure <market_id>
+
+
+
+### OLD VERSIONS BELOW HERE ###
+
 # Betflow – STATE
 
 ## What this repo is

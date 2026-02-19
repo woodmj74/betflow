@@ -32,29 +32,25 @@ def _get(d: dict, path: list[str], default: Any = None) -> Any:
 
 
 def _region_for_country(cfg: FilterConfig, country: str | None) -> Optional[str]:
-    """
-    Map Betfair event.countryCode to a configured region code by scanning cfg.regions[*].countries.
-
-    Expects cfg.regions to be a mapping like:
-      regions:
-        UK_IRE:
-          name: "UK + Ireland"
-          countries: ["GB", "IE"]
-        AUS:
-          name: "Australia"
-          countries: ["AU"]
-    """
     if not country:
         return None
 
     cc = country.strip().upper()
+
+    # cfg.regions is a dict keyed by region code (e.g. "GB", "IE")
+    # RegionConfig also contains market_countries which should include cc.
+    region = (cfg.regions or {}).get(cc)
+    if region is not None:
+        return cc
+
+    # Fallback: scan by market_countries if keys ever diverge
     for region_code, region in (cfg.regions or {}).items():
-        countries = getattr(region, "countries", None)
-        if not countries:
-            continue
-        if cc in [c.upper() for c in countries]:
-            return region_code
+        mc = getattr(region, "market_countries", None) or []
+        if cc in [str(x).upper() for x in mc]:
+            return str(region_code)
+
     return None
+
 
 
 # ----------------------------
