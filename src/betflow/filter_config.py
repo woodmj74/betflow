@@ -127,3 +127,18 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
         raise FileNotFoundError(f"Filter config not found: {path}")
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
+
+
+from pathlib import Path
+from typing import Any, Dict, Union
+
+def load_filters_config(path: Union[str, Path] = Path("config/filters.yaml")) -> Dict[str, Any]:
+    """
+    Convenience wrapper used by scripts.
+    Returns the parsed filters.yaml as a plain dict.
+
+    This function intentionally delegates to the existing loader logic in this module.
+    """
+    # ---- OPTION A: if your module already has a "load_config" style function ----
+    # Replace `load_filter_config_file` below with whatever your existing function is called.
+    return load_filter_config_file(path)  # <-- CHANGE THIS LINE to your actual loader

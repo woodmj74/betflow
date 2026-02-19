@@ -38,3 +38,17 @@ regions:
     name: "South Africa"
     market_countries: ["ZA"]
     liquidity_min: 500
+
+
+structure_gates:
+  anchor:
+    top_n: 3
+    min_top_implied: 0.65 # calculated as 1/back price - do the top n sum to <= top implied value to pass (ie over 65% probability)
+
+  soup:
+    top_k: 5
+    max_band_ratio: 1.20   # if topK max/min price <= this => FAIL soup - stops many plausible winners
+
+  tier:
+    top_region: 6
+    min_jump_ratio: 1.25   # max adjacent ratio in top_region must be >= this (ie a gap between clustered pricing)

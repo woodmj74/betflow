@@ -1,164 +1,196 @@
+# src/betflow/scripts/inspect_market_structure.py
+
 from __future__ import annotations
 
-import sys
-from datetime import datetime, timezone
+import argparse
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-from betflow.betfair.client import BetfairClient
-from betflow.markets.structure_metrics import RunnerPrice, compute_structure_metrics, market_gate_passes
+from betflow.filter_config import load_filter_config
+
+# NOTE:
+# Keep structure_metrics.py PURE (no config imports).
+# This script can import both config + metrics and glue them together.
+
+# These imports should already exist in your repo, but names may differ slightly.
+# If your client lives somewhere else, adjust THESE imports only.
+from betflow.betfair.client import BetfairClient  # type: ignore
+from betflow.betfair.types import MarketBook, MarketCatalogue  # type: ignore
+from betflow.market.structure_metrics import compute_structure_metrics  # type: ignore
 
 
-def _best_price(ex: dict, side: str) -> float | None:
+def _cfg_to_dict(cfg_obj: Any) -> Dict[str, Any]:
     """
-    ex: runner['ex'] dict from MarketBook
-    side: "availableToBack" or "availableToLay"
+    Convert FilterConfig (pydantic v1/v2) or plain dict into a plain dict.
     """
-    if not ex:
-        return None
-    ladder = ex.get(side) or []
-    if not ladder:
-        return None
-    p = ladder[0].get("price")
-    return float(p) if p is not None else None
+    if cfg_obj is None:
+        return {}
+    if isinstance(cfg_obj, dict):
+        return cfg_obj
+    # Pydantic v2
+    if hasattr(cfg_obj, "model_dump"):
+        return cfg_obj.model_dump()
+    # Pydantic v1
+    if hasattr(cfg_obj, "dict"):
+        return cfg_obj.dict()
+    # Fallback (best effort)
+    return dict(cfg_obj)
 
 
-def _cloth_number_from_metadata(md: dict) -> int | None:
+def _get(d: Dict[str, Any], path: str, default: Any = None) -> Any:
     """
-    Betfair runner metadata *sometimes* contains a cloth number. Common keys seen:
-    - "CLOTH_NUMBER"
-    - "CLOTH_NUMBER_ALPHA" (rare)
+    Simple dotted-path getter, e.g. _get(cfg, "runner_target.odds.min", 12.0)
     """
-    if not isinstance(md, dict):
-        return None
-    for k in ("CLOTH_NUMBER", "CLOTH_NUMBER_ALPHA"):
-        v = md.get(k)
-        if v is None:
-            continue
-        try:
-            return int(v)
-        except Exception:
-            continue
-    return None
+    cur: Any = d
+    for key in path.split("."):
+        if not isinstance(cur, dict) or key not in cur:
+            return default
+        cur = cur[key]
+    return cur
 
 
-def main() -> int:
-    if len(sys.argv) < 2:
-        print("Usage: python -m betflow.scripts.inspect_market_structure <marketId>")
-        return 2
+def _print_kv(title: str, value: Any) -> None:
+    print(f"{title:<30} {value}")
 
-    market_id = sys.argv[1].strip()
 
-    bf = BetfairClient()
+def _fmt_runner_no(i: int) -> str:
+    # 1 -> 01, 9 -> 09, 10 -> 10
+    return f"{i:02d}"
 
-    # --- 1) MarketCatalogue (names + start time + runner metadata if present) ---
-    cat_params = {
-        "filter": {"marketIds": [market_id]},
-        "maxResults": 1,
-        "marketProjection": [
-            "RUNNER_DESCRIPTION",
-            "RUNNER_METADATA",  # cloth number often lives here
-            "MARKET_START_TIME",
-            "EVENT",
-            "MARKET_DESCRIPTION",
-        ],
-    }
 
-    cats = bf.rpc("listMarketCatalogue", cat_params)
-    if not cats:
-        print(f"No market found for {market_id}")
-        return 1
+@dataclass(frozen=True)
+class InspectInputs:
+    market_id: str
+    config_path: Optional[Path]
 
-    cat = cats[0]
-    market_name = cat.get("marketName", "?")
-    start_time = cat.get("marketStartTime", "?")
-    event_name = (cat.get("event") or {}).get("name", "?")
 
-    sel_to_name: dict[int, str] = {}
-    sel_to_num: dict[int, int | None] = {}
+def parse_args() -> InspectInputs:
+    p = argparse.ArgumentParser(
+        prog="inspect_market_structure",
+        description="Inspect a market's structure metrics and config-driven checks.",
+    )
+    p.add_argument("market_id", help="Betfair marketId, e.g. 1.254188322")
+    p.add_argument(
+        "--config",
+        dest="config_path",
+        default=None,
+        help="Optional path to filters.yaml (defaults to repo config/filters.yaml via loader default).",
+    )
+    args = p.parse_args()
+    return InspectInputs(
+        market_id=args.market_id,
+        config_path=Path(args.config_path) if args.config_path else None,
+    )
 
-    for r in (cat.get("runners") or []):
-        sid = int(r.get("selectionId"))
-        sel_to_name[sid] = r.get("runnerName", f"sel:{sid}")
-        sel_to_num[sid] = _cloth_number_from_metadata(r.get("metadata") or {})
 
-    # --- 2) MarketBook (best prices) ---
-    book_params = {
-        "marketIds": [market_id],
-        "priceProjection": {
-            "priceData": ["EX_BEST_OFFERS"],
-            "exBestOffersOverrides": {"bestPricesDepth": 1},
-        },
-        "orderProjection": "ALL",
-        "matchProjection": "NO_ROLLUP",
-    }
+def main() -> None:
+    inp = parse_args()
 
-    books = bf.rpc("listMarketBook", book_params)
-    if not books:
-        print(f"No market book returned for {market_id}")
-        return 1
+    # --- Load config (FIXED FUNCTION NAME) ---
+    cfg_obj = load_filter_config(inp.config_path)
+    cfg = _cfg_to_dict(cfg_obj)
 
-    book = books[0]
-    runners_book = book.get("runners") or []
+    print("====================================================")
+    print("[INSPECT] Market Structure")
+    print("====================================================")
+    _print_kv("Market ID:", inp.market_id)
+    _print_kv("Config path:", str(inp.config_path) if inp.config_path else "(default loader path)")
+    print("----------------------------------------------------")
 
-    rp: list[RunnerPrice] = []
-    for rb in runners_book:
-        sid = int(rb.get("selectionId"))
-        ex = rb.get("ex") or {}
-        best_back = _best_price(ex, "availableToBack")
-        best_lay = _best_price(ex, "availableToLay")
+    # --- Connect client ---
+    client = BetfairClient.from_env()  # this matches the pattern you used elsewhere
+    client.login()
 
-        rp.append(
-            RunnerPrice(
-                selection_id=sid,
-                runner_number=sel_to_num.get(sid),
-                name=sel_to_name.get(sid, f"sel:{sid}"),
-                best_back=best_back,
-                best_lay=best_lay,
-            )
+    # --- Fetch market data ---
+    # You likely already have helpers for this in your other scripts.
+    # Keep it simple here: catalogue (names/runners/start), book (prices).
+    cat: MarketCatalogue = client.get_market_catalogue(inp.market_id)
+    book: MarketBook = client.get_market_book(inp.market_id)
+
+    # --- Print market header ---
+    _print_kv("Market name:", getattr(cat, "market_name", getattr(cat, "marketName", "(unknown)")))
+    _print_kv("Start time:", getattr(cat, "market_start_time", getattr(cat, "marketStartTime", "(unknown)")))
+    _print_kv("Event:", getattr(getattr(cat, "event", None), "name", "(unknown)"))
+    print("----------------------------------------------------")
+
+    # --- Compute metrics (structure_metrics remains pure) ---
+    metrics = compute_structure_metrics(cat, book)
+
+    # --- Display metrics summary ---
+    print("[METRICS]")
+    for k in sorted(metrics.keys()):
+        _print_kv(f"- {k}:", metrics[k])
+    print("----------------------------------------------------")
+
+    # --- Example config-driven checks (read-only) ---
+    # These assume your YAML shape from our filters.yaml discussions.
+    # Adjust dotted paths if your schema differs.
+    min_runners = _get(cfg, "market_eligibility.runners.min", 7)
+    max_runners = _get(cfg, "market_eligibility.runners.max", 16)
+
+    odds_min = _get(cfg, "runner_target.odds.min", 12.0)
+    odds_max = _get(cfg, "runner_target.odds.max", 18.0)
+
+    spread_max_ticks = _get(cfg, "runner_target.spread.max_ticks", 3)
+
+    print("[CONFIG CHECKS]")
+    _print_kv("Runner bounds:", f"{min_runners}–{max_runners}")
+    _print_kv("Target odds band:", f"{odds_min}–{odds_max}")
+    _print_kv("Max spread ticks:", spread_max_ticks)
+    print("----------------------------------------------------")
+
+    # --- Ladder view (human-friendly; with leading-zero runner numbers) ---
+    # We’re intentionally “business readable” here.
+    runners = getattr(book, "runners", [])
+    if not runners:
+        print("[LADDER] No runners found in marketBook.")
+        return
+
+    print("[LADDER] (best available back/lay)")
+    print(f"{'No':>2}  {'Runner':<26}  {'Back':>8}  {'Lay':>8}  {'Spread':>8}")
+    print("-" * 60)
+
+    # Attempt to map selectionId -> runner name from catalogue
+    name_by_sel: Dict[int, str] = {}
+    cat_runners = getattr(cat, "runners", getattr(cat, "runners", [])) or []
+    for r in cat_runners:
+        sel_id = int(getattr(r, "selection_id", getattr(r, "selectionId", 0)) or 0)
+        nm = str(getattr(r, "runner_name", getattr(r, "runnerName", "")) or "")
+        if sel_id:
+            name_by_sel[sel_id] = nm
+
+    # Sort by last traded price if present; fallback selectionId
+    def _runner_sort_key(r: Any) -> Any:
+        ltp = getattr(r, "last_price_traded", getattr(r, "lastPriceTraded", None))
+        sel = getattr(r, "selection_id", getattr(r, "selectionId", 0))
+        return (ltp is None, ltp if ltp is not None else 9999.0, int(sel or 0))
+
+    runners_sorted = sorted(runners, key=_runner_sort_key)
+
+    for idx, r in enumerate(runners_sorted, start=1):
+        sel = int(getattr(r, "selection_id", getattr(r, "selectionId", 0)) or 0)
+        nm = name_by_sel.get(sel, f"selectionId {sel}")
+
+        ex = getattr(r, "ex", None)
+        backs = getattr(ex, "available_to_back", getattr(ex, "availableToBack", [])) if ex else []
+        lays = getattr(ex, "available_to_lay", getattr(ex, "availableToLay", [])) if ex else []
+
+        best_back = float(getattr(backs[0], "price", getattr(backs[0], "price", 0.0))) if backs else 0.0
+        best_lay = float(getattr(lays[0], "price", getattr(lays[0], "price", 0.0))) if lays else 0.0
+
+        spread = best_lay - best_back if best_back and best_lay else 0.0
+
+        print(
+            f"{_fmt_runner_no(idx):>2}  "
+            f"{nm[:26]:<26}  "
+            f"{best_back:>8.2f}  "
+            f"{best_lay:>8.2f}  "
+            f"{spread:>8.2f}"
         )
 
-    # Sort by best back ascending (favourite first). Missing backs go to bottom.
-    rp.sort(key=lambda r: (r.best_back is None, r.best_back or 9999.0))
-
-    # --- 3) Metrics + gate ---
-    metrics = compute_structure_metrics(rp)
-    passed, reasons = market_gate_passes(metrics)
-
-    # --- 4) Print report ---
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    print()
-    print(f"[STRUCTURE] {now}")
-    print(f"Market: {market_id}  |  {event_name}  |  {market_name}")
-    print(f"Start:  {start_time}")
-    print()
-
-    status = "✅ PASS" if passed else "❌ FAIL"
-    print(f"Gate: {status}")
-    for line in reasons:
-        print(f"  - {line}")
-    print()
-
-    print(
-        f"Stats: runners={metrics.runner_count}  "
-        f"top{metrics.top_cluster_n}_implied={metrics.top_cluster_implied_sum:.3f}  "
-        f"tier_jump(max top)={metrics.max_tier_jump_ratio_top:.3f}  "
-        f"soup_ratio(top{metrics.soup_top_k})={metrics.soup_band_ratio:.3f}"
-    )
-    print()
-
-    print("Runners (sorted by best BACK):")
-    print("No  Back    Lay     Sprd   Impl%   Name")
-    print("--  ------  ------  -----  ------  ------------------------------")
-    for r in rp[: min(20, len(rp))]:
-        num = f"{r.runner_number:02d}" if isinstance(r.runner_number, int) else "--"
-        back = f"{r.best_back:>6.2f}" if r.best_back is not None else "  None"
-        lay = f"{r.best_lay:>6.2f}" if r.best_lay is not None else "  None"
-        sprd = f"{r.spread:>5.2f}" if r.spread is not None else " None"
-        impl = f"{(r.implied_from_back * 100):>5.1f}%" if r.implied_from_back is not None else "  N/A"
-        print(f"{num}  {back}  {lay}  {sprd}  {impl:>6}  {r.name[:30]}")
-
-    print()
-    return 0
+    print("====================================================")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
