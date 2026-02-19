@@ -110,3 +110,52 @@ Optional (defaults to `/opt/betflow/secrets/...` if not set):
    - e.g. count of runners under odds threshold, per market
 4) Runner selection rules (odds-band harvesting ~12–18, spread thresholds)
 5) Paper bet object model + audit logging (no live orders yet)
+
+
+## Phase 2 – Market Structure Inspection (2026-02-19)
+
+### What was added
+
+- `inspect_market_structure.py` script
+- Config loader aligned (`load_filter_config`)
+- Dataclass config handling via `asdict`
+- MarketCatalogue + MarketBook RPC integration
+- Human-readable ladder output:
+  - Runner number (leading zero)
+  - Best back / lay
+  - Spread (ticks)
+- Basic structure metrics:
+  - Runner count
+  - Count of runners < 10.0
+- Logging confirms stable Betfair RPC flow
+
+### What this script currently does
+
+- Pulls live market data
+- Displays ladder and structural shape
+- Displays config parameters (read-only context)
+
+### What it does NOT yet do
+
+- Apply structural gating rules
+- Accept/reject market
+- Perform anchor / candidate selection
+- Score runners
+- Persist output
+
+### Technical Notes
+
+- Tick calculation currently approximate (acceptable for diagnostics phase)
+- `structure_metrics.py` remains pure
+- `filter_config.py` still contains legacy stub (`load_filters_config`) — to be cleaned next
+
+### Next Planned Step
+
+- Add config-driven market-level rule evaluation
+- Print ✓ / ✗ per rule
+- Emit MARKET ACCEPTED / REJECTED decision
+
+### Sanity Check
+
+```bash
+python -c "import betflow; print('imports ok')"

@@ -77,3 +77,25 @@ flowchart LR
   C --> D[BetfairClient.rpc]
   D --> E[Betfair API]
   C --> A
+
+
+---
+
+## 2️⃣ PROJECT_MAP.md Update
+
+We keep this shorter — this is architecture view, not narrative.
+
+Add under Phase 2:
+
+```markdown
+### Phase 2 – Market Structure
+
+inspect_market_structure.py
+  - Uses BetfairClient.rpc()
+  - Loads filter_config
+  - Produces diagnostic ladder view
+  - Calculates basic structural metrics
+
+No selection logic yet.
+No persistence.
+No staking.
