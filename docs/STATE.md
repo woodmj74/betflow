@@ -7,16 +7,25 @@ Betflow is a research-oriented Betfair Exchange platform (paper trading first). 
 We intentionally reset `main` to a minimal, purpose-built baseline to remove confusion and rebuild with a clear structure and repeatable workflow.
 The previous working implementation has been preserved in branch: `firstbuild`.
 
-## Current baseline (as of 2026-02-18)
+## Current baseline (as of 2026-02-19)
 A minimal skeleton has been implemented under `src/` with:
-- `settings.py` — loads environment config via `.env` (local only, not tracked)
-- `logging.py` — structured logging via `structlog` (pretty console in dev)
-- `betfair/client.py` — thin Betfair gateway supporting cert login + JSON-RPC
-- `scripts/test_connection.py` — smoke test proving auth + API calls
 
-### Proof point (works)
+- `settings.py` — loads environment config via `.env` (local only, not tracked) and exports a singleton `settings`
+- `logging.py` — structured logging via `structlog` (pretty console in dev)
+- `betfair/client.py` — thin Betfair gateway supporting cert login + JSON-RPC + session retry
+- `filter_config.py` — YAML-driven market filtering config loader
+- `services/market_discovery.py` — reusable market discovery + eligibility logic (Phase 1: region + runners + liquidity)
+- `scripts/test_connection.py` — smoke test proving auth + API call
+- `scripts/test_session_retry.py` — proof of automatic re-login on invalid session
+- `scripts/discover_markets.py` — prints next markets by time with verbose eligibility reasons
+
+### Proof points (work)
 Run from repo root:
 
+0) Import sanity check:
+`python -c "import betflow; print('imports ok')"`
+
+1) Connection smoke test:
 `python -m betflow.scripts.test_connection`
 
 Expected:
@@ -24,12 +33,34 @@ Expected:
 - Successful JSON-RPC call to `listEventTypes`
 - Prints the first ~10 event types and "✅ Connection looks good."
 
+2) Session retry proof:
+`python -m betflow.scripts.test_session_retry`
+
+Expected:
+- Login succeeds
+- Script deliberately breaks the session token
+- First RPC attempt fails with `INVALID_SESSION_INFORMATION`
+- Client re-logins once and retries once
+- Call succeeds and script prints "✅ Session retry proof passed."
+
+3) Market discovery (Phase 1):
+`python -m betflow.scripts.discover_markets`
+
+Expected:
+- Discovers upcoming Horse Racing WIN markets across configured countries
+- Takes the next N races by start time (config: `global.take`)
+- Applies eligibility gates:
+  - runner count min/max (global default with optional region override)
+  - liquidity min (global default with optional region override)
+- Prints pass/fail reasons per market + Eligible/Rejected summary
+
 ## How to resume (always start here)
 1) `git pull`
 2) Read this file top-to-bottom
 3) Ensure `.env` exists locally (NOT committed)
-4) Run smoke test: `python -m betflow.scripts.test_connection`
-5) If smoke test fails: check `Known gotchas` below
+4) Run import sanity check: `python -c "import betflow; print('imports ok')"`
+5) Run smoke test: `python -m betflow.scripts.test_connection`
+6) If smoke test fails: check `Known gotchas` below
 
 ## Branches
 - `main`       = clean-slate rebuild (authoritative going forward)
@@ -48,9 +79,9 @@ Expected:
 - `src/betflow/` application package
 - `src/betflow/betfair/` Betfair API client(s)
 - `src/betflow/scripts/` runnable utilities / smoke tests
-- `docs/` project documentation (this file)
-- (planned) `config/` configuration (YAML profiles etc.)
-- (planned) `services/` reusable logic once we reintroduce market selection/ladders
+- `src/betflow/services/` reusable logic (discovery, ladder, selection, etc.)
+- `docs/` project documentation (this file + project map)
+- `config/` configuration (YAML profiles etc.)
 
 ## Environment variables (current)
 Local `.env` contains:
@@ -65,19 +96,17 @@ Optional (defaults to `/opt/betflow/secrets/...` if not set):
 
 ## Known gotchas
 - **Cert login response format**: Betfair cert login may return JSON (not key=value lines).
-  We now parse JSON first, then fall back to key=value parsing.
+  We parse JSON first, then fall back to key=value parsing.
 - Betfair session tokens expire; do not treat session tokens as persistent state.
+  We now handle expiry by re-login once and retry once.
 - Best back/lay prices require `listMarketBook` with `priceProjection` including `EX_BEST_OFFERS`.
 - Keep `.env` out of Git. If it was ever committed to a public repo, rotate credentials/keys.
 
 ## Next steps (immediate)
-1) Commit the clean skeleton + working smoke test as the new baseline checkpoint
-2) Add session retry logic in `BetfairClient`:
-   - on `INVALID_SESSION_INFORMATION`, re-login once and retry the request once
-3) Reintroduce market discovery (Horse Racing WIN, region filtering) as a script with verbose pass/fail reasons
-4) Reintroduce market ladder + market shape services (incremental, with proof scripts)
-
-## Next milestone (near-term)
-- Market eligibility rules (field size, liquidity, compression, spreads)
-- Runner selection rules (odds-band harvesting ~12–18, spread thresholds)
-- Paper bet object model + audit logging (no live orders yet)
+1) Phase 2: Get runners/prices for eligible markets:
+   - `listMarketCatalogue` (runner metadata) + `listMarketBook` (prices, totalMatched, status)
+2) Implement ladder output for eligible markets (best back/lay, spread in ticks)
+3) Add compression rules (price-based) and integrate into eligibility:
+   - e.g. count of runners under odds threshold, per market
+4) Runner selection rules (odds-band harvesting ~12–18, spread thresholds)
+5) Paper bet object model + audit logging (no live orders yet)
