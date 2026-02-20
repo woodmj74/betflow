@@ -1,6 +1,4 @@
-# Betflow - Filters (Lane 1)
-# Canonical schema expected by: src/betflow/filter_config.py
-# Mode A: only what Phase 2 needs (market discovery + structure gates)
+# Betflow - Filters 
 
 global:
   # how far ahead we look for markets (discover script)
@@ -12,44 +10,68 @@ global:
   defaults:
     # market-level eligibility (basic sweep gates)
     runner_count:
-      min: 7
+      min: 6
       max: 16
 
     # minimum matched volume / liquidity gate
     liquidity_min: 2000
 
 
-# Regions are "profiles" (your term) that apply different country sets + liquidity norms.
+# Regions apply different country sets + liquidity norms.
 # Code expects: regions.<key>.market_countries and regions.<key>.liquidity_min
 regions:
   UK_IRE:
     name: "UK & Ireland"
     market_countries: ["GB", "IE"]
-    liquidity_min: 2000
+    liquidity_min: 5000
 
-  # Optional placeholders for later (safe to leave commented out)
-  # AUS:
-  #   name: "Australia"
-  #   market_countries: ["AU"]
-  #   liquidity_min: 5000
+  AUS:
+    name: "Australia"
+    market_countries: ["AU"]
+    liquidity_min: 1000
 
 
-# Phase 2: structure gates used by market_rules.py
 # These are your original anchor/soup/tier concepts.
 structure_gates:
   anchor:
     top_n: 3
-    min_top_implied: 0.99
+    min_top_implied: 0.65
     # Meaning: sum(1/back_price) of top N <=? (or >=?) depends on rule implementation.
     # We are NOT changing logic here — just providing config in the expected place. (0.65)
 
   soup:
     top_k: 5
     max_band_ratio: 1.20
-    # Meaning: within top K runners, max_price / min_price must be >=? (or <=?) per rule.
-    # Again, config only — logic stays as-is. (1.20)
+    # Meaning: within top K runners, max_price / min_price must be >=? (or <=?) per rule. (1.20)
 
   tier:
     top_region: 6
     min_jump_ratio: 1.25
     # Meaning: require a meaningful step between adjacent prices in the top region. (1.25)
+
+
+selection:
+  # Hard working bounds: outside this, never select
+  hard_band:
+    min: 12.0
+    max: 20.0
+
+  # Preferred harvesting zone (your philosophy 3.1)
+  primary_band:
+    min: 14.0
+    max: 17.0
+
+  # Secondary zone: allowed only when the market is strongly anchored
+  secondary_band:
+    min: 12.0
+    max: 14.0
+    # Interpretation: if sum implied prob of top N (anchor gate top_n) >= this, secondary band is allowed
+    requires_top_n_implied_at_least: 0.70
+
+  # Runner gating / quality
+  max_spread_ticks: 5
+
+  # Rank exclusion (B2): avoid favourites-adjacent and total rags
+  rank_exclusion:
+    top_n: 2
+    bottom_n: 2    

@@ -80,6 +80,7 @@ class FilterConfig:
     global_cfg: GlobalConfig
     regions: Dict[str, RegionConfig]
     structure_gates: StructureGates
+    selection: SelectionConfig
 
     def resolve_liquidity_min(self, region_code: str) -> float:
         region = self.regions[region_code]
@@ -100,6 +101,32 @@ class FilterConfig:
                 seen.add(c)
                 out.append(c)
         return out
+
+# -----------------
+# NEW: Runner selection
+# -----------------
+
+@dataclass(frozen=True)
+class OddsBand:
+    min: float
+    max: float
+
+@dataclass(frozen=True)
+class SecondaryBand(OddsBand):
+    requires_top_n_implied_at_least: float
+
+@dataclass(frozen=True)
+class RankExclusion:
+    top_n: int
+    bottom_n: int
+
+@dataclass(frozen=True)
+class SelectionConfig:
+    hard_band: OddsBand
+    primary_band: OddsBand
+    secondary_band: SecondaryBand
+    max_spread_ticks: int
+    rank_exclusion: RankExclusion
 
 
 def load_filter_config(path: Optional[PathLike] = None) -> FilterConfig:
@@ -180,7 +207,41 @@ def load_filter_config(path: Optional[PathLike] = None) -> FilterConfig:
         ),
     )
 
-    return FilterConfig(global_cfg=global_cfg, regions=regions, structure_gates=structure_gates)
+    #----adding runner in
+    sel = data.get("selection", {}) or {}
+
+    hard_raw = sel.get("hard_band", {}) or {}
+    primary_raw = sel.get("primary_band", {}) or {}
+    secondary_raw = sel.get("secondary_band", {}) or {}
+    rank_raw = sel.get("rank_exclusion", {}) or {}
+
+    selection_cfg = SelectionConfig(
+        hard_band=OddsBand(
+            min=float(hard_raw.get("min", 12.0)),
+            max=float(hard_raw.get("max", 18.0)),
+        ),
+        primary_band=OddsBand(
+            min=float(primary_raw.get("min", 14.0)),
+            max=float(primary_raw.get("max", 17.0)),
+        ),
+        secondary_band=SecondaryBand(
+            min=float(secondary_raw.get("min", 12.0)),
+            max=float(secondary_raw.get("max", 14.0)),
+            requires_top_n_implied_at_least=float(secondary_raw.get("requires_top_n_implied_at_least", 0.70)),
+        ),
+        max_spread_ticks=int(sel.get("max_spread_ticks", 5)),
+        rank_exclusion=RankExclusion(
+            top_n=int(rank_raw.get("top_n", 2)),
+            bottom_n=int(rank_raw.get("bottom_n", 2)),
+        ),
+    )
+
+    return FilterConfig(
+        global_cfg=global_cfg,
+        regions=regions,
+        structure_gates=structure_gates,
+        selection=selection_cfg,
+    )
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:

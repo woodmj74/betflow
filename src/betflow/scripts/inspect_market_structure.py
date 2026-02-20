@@ -5,7 +5,11 @@ from datetime import datetime, timezone
 from betflow.betfair.client import BetfairClient
 from betflow.filter_config import load_filter_config
 from betflow.markets.market_rules import evaluate_market_rules
-from betflow.markets.structure_metrics import build_runner_ladders, compute_market_structure_metrics
+from betflow.markets.structure_metrics import (
+    build_runner_ladders,
+    compute_market_structure_metrics,
+    select_candidate_runner,
+)
 
 
 def _fmt_dt(iso: str) -> str:
@@ -41,6 +45,106 @@ def _print_ladder(ladders) -> None:
 
         name = (getattr(r, "name", "") or "")[:30]
         print(f"  {num}  {name:<30} {back}  {lay}  {sprd}")
+
+def _print_selection_debug(cfg, metrics, debug_rows, selected) -> None:
+    # ---- Config summary
+    sel = cfg.selection
+    hard = sel.hard_band
+    primary = sel.primary_band
+    secondary = sel.secondary_band
+    rank_excl = sel.rank_exclusion
+
+    top_n = cfg.structure_gates.anchor.top_n
+    top_n_implied = getattr(metrics, "top_n_implied_sum", None)
+
+    anchored_ok = False
+    if top_n_implied is not None:
+        anchored_ok = top_n_implied >= secondary.requires_top_n_implied_at_least
+
+    print("  Config:")
+    print(f"    hard_band:      {hard.min:.1f}–{hard.max:.1f}")
+    print(f"    primary_band:   {primary.min:.1f}–{primary.max:.1f}")
+    if top_n_implied is None:
+        print(
+            f"    secondary_band: {secondary.min:.1f}–{secondary.max:.1f} "
+            f"(allowed if top{top_n} implied >= {secondary.requires_top_n_implied_at_least:.2f}; top{top_n}=? )"
+        )
+    else:
+        print(
+            f"    secondary_band: {secondary.min:.1f}–{secondary.max:.1f} "
+            f"(allowed: {'YES' if anchored_ok else 'NO'}; top{top_n}={top_n_implied:.2f} >= {secondary.requires_top_n_implied_at_least:.2f})"
+        )
+    print(f"    max_spread:     {sel.max_spread_ticks} ticks")
+    print(f"    rank_excl:      top {rank_excl.top_n}, bottom {rank_excl.bottom_n}")
+    print("")
+
+    # ---- Table header
+    print("  No  Runner                           Back     Lay  Sprd  Rank  Band       Score    Status     Reason")
+    print("  ----------------------------------------------------------------------------------------------------")
+
+    # Ensure stable ordering by price rank
+    rows = sorted(debug_rows, key=lambda x: x.price_rank)
+
+    eligible_count = 0
+    for row in rows:
+        r = row.runner
+
+        # cloth number if present, otherwise rank-based fallback
+        num_val = getattr(r, "runner_number", None)
+        num = f"{int(num_val):02d}" if num_val is not None else f"{row.price_rank:02d}"
+
+        name = (getattr(r, "name", "") or "")[:30]
+
+        back = f"{r.best_back:>6.2f}" if getattr(r, "best_back", None) else "  -   "
+        lay = f"{r.best_lay:>6.2f}" if getattr(r, "best_lay", None) else "  -   "
+        sprd = f"{row.spread_ticks:>4d}" if row.spread_ticks is not None else "  - "
+
+        band = f"{row.band:<9}"
+
+        # Decide eligible by score sentinel
+        is_eligible = row.score > -9000
+        status = "ELIGIBLE" if is_eligible else "REJECTED"
+        if is_eligible:
+            eligible_count += 1
+
+        score = f"{row.score:>7.1f}" if is_eligible else "   -   "
+
+        reason = (row.reason or "")[:40]
+
+        print(f"  {num}  {name:<30} {back:>6}  {lay:>6}  {sprd:>4}  {row.price_rank:>4}  {band}  {score:>7}  {status:<9}  {reason}")
+
+    print("")
+    print(f"  Eligible runners: {eligible_count}")
+
+    # ---- Selection summary line
+    if selected is None:
+        print("  → Selected: NONE")
+    else:
+        sel_num_val = getattr(selected, "runner_number", None)
+        sel_num = f"{int(sel_num_val):02d}" if sel_num_val is not None else "--"
+        sel_name = getattr(selected, "name", "") or ""
+        sel_back = getattr(selected, "best_back", None)
+        if sel_back is not None:
+            print(f"  → Selected: {sel_num} {sel_name} @ {sel_back:.2f}")
+        else:
+            print(f"  → Selected: {sel_num} {sel_name}")
+
+    # ---- Diff-friendly single-line summary
+    if top_n_implied is None:
+        anchored_txt = "anchored_ok=?"
+        topn_txt = f"top{top_n}=?"
+    else:
+        anchored_txt = f"anchored_ok={'YES' if anchored_ok else 'NO'}"
+        topn_txt = f"top{top_n}={top_n_implied:.2f}"
+
+    if selected is None:
+        print(f"  selection_summary: selected=NONE {anchored_txt} {topn_txt} eligible={eligible_count}")
+    else:
+        sel_num_val = getattr(selected, "runner_number", None)
+        sel_num = f"{int(sel_num_val):02d}" if sel_num_val is not None else "--"
+        sel_back = getattr(selected, "best_back", None)
+        back_txt = f"@{sel_back:.2f}" if sel_back is not None else ""
+        print(f"  selection_summary: selected={sel_num}{back_txt} {anchored_txt} {topn_txt} eligible={eligible_count}")
 
 
 def inspect_one_market(client: BetfairClient, market_id: str, filters_path: str) -> None:
@@ -92,7 +196,12 @@ def inspect_one_market(client: BetfairClient, market_id: str, filters_path: str)
 
     # --- Build ladders + metrics (always)
     ladders = build_runner_ladders(market_catalogue, market_book)
-    metrics = compute_market_structure_metrics(ladders)
+    metrics = compute_market_structure_metrics(
+        ladders,
+        anchor_top_n=cfg.structure_gates.anchor.top_n,
+        soup_top_k=cfg.structure_gates.soup.top_k,
+        tier_top_region=cfg.structure_gates.tier.top_region,
+    )
 
     # --- Market-level gating (config-driven)
     accepted, region_code, rule_results = evaluate_market_rules(
@@ -114,6 +223,23 @@ def inspect_one_market(client: BetfairClient, market_id: str, filters_path: str)
 
     # --- Ladder (always)
     _print_ladder(ladders)
+
+    # --- Selection (only if market accepted)
+    print("")
+    print("")
+    print("[SELECTION]")
+
+    if accepted:
+        selected, debug_rows = select_candidate_runner(
+            ladders=ladders,
+            metrics=metrics,
+            cfg=cfg,
+        )
+
+        _print_selection_debug(cfg=cfg, metrics=metrics, debug_rows=debug_rows, selected=selected)
+
+    else:
+        print("  → Market rejected — no runner considered")
 
     print("")
     print("[DECISION]")
