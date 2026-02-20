@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
 
 from betflow.betfair.client import BetfairClient
-from betflow.filter_config import load_filter_config, FilterConfig
+from betflow.filter_config import load_filter_config
 from betflow.markets.market_rules import evaluate_market_rules
 from betflow.markets.structure_metrics import build_runner_ladders, compute_market_structure_metrics
 
@@ -26,7 +25,7 @@ def _print_rule_results(rule_results) -> None:
 def _print_ladder(ladders) -> None:
     print("")
     print("[LADDER]  (best back/lay)")
-    print("  No  Runner                           Back       Lay    Sprd(t)")
+    print("  No  Runner                             Back       Lay    Sprd(t)")
     print("  ----------------------------------------------------------------")
 
     for idx, r in enumerate(ladders, start=1):
@@ -44,8 +43,8 @@ def _print_ladder(ladders) -> None:
         print(f"  {num}  {name:<30} {back}  {lay}  {sprd}")
 
 
-def inspect_one_market(client: BetfairClient, market_id: str, filters_path: Optional[str]) -> None:
-    cfg: FilterConfig = load_filter_config(filters_path)
+def inspect_one_market(client: BetfairClient, market_id: str, filters_path: str) -> None:
+    cfg = load_filter_config(filters_path)
 
     # --- MarketCatalogue
     cat = client.rpc(
@@ -90,8 +89,6 @@ def inspect_one_market(client: BetfairClient, market_id: str, filters_path: Opti
     if venue:
         print(f"  Venue: {venue}")
     print(f"  Country: {country or '?'}")
-
-
 
     # --- Build ladders + metrics (always)
     ladders = build_runner_ladders(market_catalogue, market_book)
