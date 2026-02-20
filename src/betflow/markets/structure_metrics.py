@@ -55,88 +55,19 @@ def ticks_between(back: float, lay: float) -> int:
         cur = nxt
     return ticks
 
-def select_candidate_runner(
-    ladders: Iterable[RunnerLadder],
-    metrics: MarketStructureMetrics,
-    cfg: Any,  # cfg is FilterConfig; kept Any here to avoid import cycle risk
-) -> tuple[RunnerLadder | None, list[RunnerSelectionRow]]:
-    rows = [r for r in ladders if r.best_back is not None and r.best_back > 0]
-    rows.sort(key=lambda r: r.best_back or 9999.0)
 
-    # Anchor condition to allow secondary band
-    top_n = max(int(getattr(cfg.structure_gates.anchor, "top_n", 3)), 0)
-    anchored_ok = metrics.top_n_implied_sum >= float(cfg.selection.secondary_band.requires_top_n_implied_at_least)
+def _distance_ticks(price: float, centre: float) -> int:
+    """
+    Approx tick distance between price and centre.
+    We round to nearest whole tick so we avoid fractional tick debates in logs.
+    """
+    if price <= 0 or centre <= 0:
+        return 9999
 
-    hard = cfg.selection.hard_band
-    primary = cfg.selection.primary_band
-    secondary = cfg.selection.secondary_band
-    max_spread = int(cfg.selection.max_spread_ticks)
+    # Use tick size at the price point (consistent, simple).
+    t = tick_size(price)
+    return int(round(abs(price - centre) / t))
 
-    top_excl = int(cfg.selection.rank_exclusion.top_n)
-    bot_excl = int(cfg.selection.rank_exclusion.bottom_n)
-
-    debug: list[RunnerSelectionRow] = []
-    eligible: list[RunnerSelectionRow] = []
-
-    total = len(rows)
-
-    for idx, r in enumerate(rows, start=1):
-        st = r.spread_ticks
-        if r.best_back is None or r.best_lay is None:
-            debug.append(RunnerSelectionRow(r, idx, "-", st, -9999.0, "missing back/lay"))
-            continue
-
-        # Hard band gate
-        if not (hard.min <= r.best_back <= hard.max):
-            debug.append(RunnerSelectionRow(r, idx, "-", st, -9999.0, "outside hard band"))
-            continue
-
-        # Spread gate
-        if st is None or st > max_spread:
-            debug.append(RunnerSelectionRow(r, idx, "HARD", st, -9999.0, f"spread {st} > {max_spread}"))
-            continue
-
-        # Rank exclusion (B2)
-        if top_excl > 0 and idx <= top_excl:
-            debug.append(RunnerSelectionRow(r, idx, "HARD", st, -9999.0, f"excluded: top {top_excl}"))
-            continue
-        if bot_excl > 0 and total - idx < bot_excl:
-            debug.append(RunnerSelectionRow(r, idx, "HARD", st, -9999.0, f"excluded: bottom {bot_excl}"))
-            continue
-
-        # Band classification + scoring
-        band = "-"
-        score = 0.0
-        reasons: list[str] = []
-
-        in_primary = primary.min <= r.best_back <= primary.max
-        in_secondary = secondary.min <= r.best_back <= secondary.max
-
-        if in_primary:
-            band = "PRIMARY"
-            # Score: favour middle of primary band, tie-break by spread
-            centre = (primary.min + primary.max) / 2.0
-            score = 100.0 - abs(r.best_back - centre) * 10.0 - float(st)
-            reasons.append("in primary band")
-        elif anchored_ok and in_secondary:
-            band = "SECONDARY"
-            # Lower base than primary
-            centre = (secondary.min + secondary.max) / 2.0
-            score = 50.0 - abs(r.best_back - centre) * 10.0 - float(st)
-            reasons.append("secondary allowed (anchored)")
-        else:
-            debug.append(RunnerSelectionRow(r, idx, "HARD", st, -9999.0, "not in allowed band"))
-            continue
-
-        row = RunnerSelectionRow(r, idx, band, st, score, "; ".join(reasons))
-        eligible.append(row)
-        debug.append(row)
-
-    if not eligible:
-        return None, debug
-
-    eligible.sort(key=lambda x: (-x.score, x.spread_ticks if x.spread_ticks is not None else 9999, x.runner.best_back or 9999.0))
-    return eligible[0].runner, debug
 
 # ----------------------------
 # Data models
@@ -178,8 +109,135 @@ class RunnerSelectionRow:
     price_rank: int  # 1 = favourite by price
     band: str        # "PRIMARY" | "SECONDARY" | "HARD" | "-"
     spread_ticks: int | None
-    score: float
+    distance_ticks: int | None
+    score: float     # kept for compatibility with existing debug printing (not used for ordering)
     reason: str
+
+
+# ----------------------------
+# Selection (Stage 2)
+# ----------------------------
+
+def select_candidate_runner(
+    ladders: Iterable[RunnerLadder],
+    metrics: MarketStructureMetrics,
+    cfg: Any,  # FilterConfig (Any here avoids import cycles)
+) -> tuple[RunnerLadder | None, list[RunnerSelectionRow]]:
+    """
+    Deterministic selection (explainable):
+      - Apply hard gates (hard band, spread, rank exclusion)
+      - Classify as PRIMARY / SECONDARY (secondary only if anchored_ok)
+      - Choose ONE runner:
+          Primary candidates ordered by (spread_ticks, distance_ticks, best_back)
+          If no primary candidates, use secondary candidates with same ordering.
+    Returns: (selected_runner_or_None, debug_rows)
+    """
+
+    rows = [r for r in ladders if r.best_back is not None and r.best_back > 0]
+    rows.sort(key=lambda r: r.best_back or 9999.0)  # price rank basis
+
+    # Anchor condition to allow secondary band
+    top_n = max(int(getattr(cfg.structure_gates.anchor, "top_n", 3)), 0)
+    anchored_ok = metrics.top_n_implied_sum >= float(cfg.selection.secondary_band.requires_top_n_implied_at_least)
+
+    hard = cfg.selection.hard_band
+    primary = cfg.selection.primary_band
+    secondary = cfg.selection.secondary_band
+    max_spread = int(cfg.selection.max_spread_ticks)
+
+    top_excl = int(cfg.selection.rank_exclusion.top_n)
+    bot_excl = int(cfg.selection.rank_exclusion.bottom_n)
+
+    debug: list[RunnerSelectionRow] = []
+    eligible_primary: list[RunnerSelectionRow] = []
+    eligible_secondary: list[RunnerSelectionRow] = []
+
+    total = len(rows)
+
+    primary_centre = (primary.min + primary.max) / 2.0
+    secondary_centre = (secondary.min + secondary.max) / 2.0
+
+    for idx, r in enumerate(rows, start=1):
+        st = r.spread_ticks
+        # Pre-compute rank exclusion tag for diagnostics (even if runner fails earlier gates)
+        rank_tag: str | None = None
+        if top_excl > 0 and idx <= top_excl:
+            rank_tag = f"excluded: top {top_excl}"
+        elif bot_excl > 0 and (total - idx) < bot_excl:
+            rank_tag = f"excluded: bottom {bot_excl}"
+
+        # Must have both back and lay to be considered tradable
+        if r.best_back is None or r.best_lay is None:
+            reason = "missing back/lay"
+            if rank_tag:
+                reason = f"{reason}; {rank_tag}"
+            debug.append(RunnerSelectionRow(r, idx, "-", st, None, -9999.0, reason))
+            continue
+
+        # Hard band gate (identity guardrail)
+        if not (hard.min <= r.best_back <= hard.max):
+            reason = "outside hard band"
+            if rank_tag:
+                reason = f"{reason}; {rank_tag}"
+            debug.append(RunnerSelectionRow(r, idx, "-", st, None, -9999.0, reason))
+            continue
+
+        # Spread gate
+        if st is None or st > max_spread:
+            reason = f"spread {st} > {max_spread}"
+            if rank_tag:
+                reason = f"{reason}; {rank_tag}"
+            debug.append(RunnerSelectionRow(r, idx, "HARD", st, None, -9999.0, reason))
+            continue
+
+        # Rank exclusion
+        if top_excl > 0 and idx <= top_excl:
+            debug.append(RunnerSelectionRow(r, idx, "HARD", st, None, -9999.0, f"excluded: top {top_excl}"))
+            continue
+        if bot_excl > 0 and (total - idx) < bot_excl:
+            debug.append(RunnerSelectionRow(r, idx, "HARD", st, None, -9999.0, f"excluded: bottom {bot_excl}"))
+            continue
+
+        in_primary = primary.min <= r.best_back <= primary.max
+        in_secondary = secondary.min <= r.best_back <= secondary.max
+
+        if in_primary:
+            dt = _distance_ticks(r.best_back, primary_centre)
+            row = RunnerSelectionRow(r, idx, "PRIMARY", st, dt, 0.0, "in primary band")
+            eligible_primary.append(row)
+            debug.append(row)
+            continue
+
+        if anchored_ok and in_secondary:
+            dt = _distance_ticks(r.best_back, secondary_centre)
+            row = RunnerSelectionRow(r, idx, "SECONDARY", st, dt, 0.0, "secondary allowed (anchored)")
+            eligible_secondary.append(row)
+            debug.append(row)
+            continue
+
+        # In hard band, but not in an allowed selection band
+        if in_secondary and not anchored_ok:
+            debug.append(RunnerSelectionRow(r, idx, "HARD", st, None, -9999.0, "secondary not allowed (anchoring)"))
+        else:
+            debug.append(RunnerSelectionRow(r, idx, "HARD", st, None, -9999.0, "not in allowed band"))
+
+    def _order_key(row: RunnerSelectionRow) -> tuple[int, int, float]:
+        sprd = row.spread_ticks if row.spread_ticks is not None else 9999
+        dist = row.distance_ticks if row.distance_ticks is not None else 9999
+        back = row.runner.best_back if row.runner.best_back is not None else 9999.0
+        return (sprd, dist, back)
+
+    # Choose from primary first, then secondary
+    if eligible_primary:
+        eligible_primary.sort(key=_order_key)
+        return eligible_primary[0].runner, debug
+
+    if eligible_secondary:
+        eligible_secondary.sort(key=_order_key)
+        return eligible_secondary[0].runner, debug
+
+    return None, debug
+
 
 # ----------------------------
 # Extraction helpers
@@ -248,7 +306,13 @@ def build_runner_ladders(market_catalogue: dict, market_book: dict) -> list[Runn
 # Metrics
 # ----------------------------
 
-def compute_market_structure_metrics(ladders: Iterable[RunnerLadder], *, anchor_top_n: int = 3, soup_top_k: int = 5, tier_top_region: int = 6) -> MarketStructureMetrics:
+def compute_market_structure_metrics(
+    ladders: Iterable[RunnerLadder],
+    *,
+    anchor_top_n: int = 3,
+    soup_top_k: int = 5,
+    tier_top_region: int = 6,
+) -> MarketStructureMetrics:
     rows = list(ladders)
     runner_count = len(rows)
 

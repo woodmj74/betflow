@@ -243,25 +243,96 @@ Purpose:
 
 ---
 
-## 3.6 Final Selection Logic
+## 3.6 Selection Ordering Logic (Scoring Model)
 
-Among eligible runners:
+Betflow does not use predictive modelling.  
+The selection “score” is simply a deterministic ordering mechanism between already-eligible runners.
 
-- Apply deterministic ordering (e.g., spread-first then centrality).
-- Select exactly one runner.
-- If none eligible → NO SELECTION.
+### Design Intent
+
+The ordering reflects two priorities:
+
+1. Execution quality (tight spreads)
+2. Structural fit within the preferred band (avoid edges)
+
+No narrative or outcome-based inputs are used.
 
 ---
 
-## 3.7 Debug Output (Mandatory)
+### Units of Measurement
+
+All distance comparisons are performed in **Betfair ticks**, not raw price differences.
+
+Reason:
+- Tick size varies across price ranges.
+- Spread is already measured in ticks.
+- Using ticks keeps distance and spread comparable and interpretable.
+
+---
+
+### Primary Band Ordering
+
+For runners in the Primary band:
+
+1. Lowest `spread_ticks` wins.
+2. If tied, lowest `distance_from_primary_centre_ticks` wins.
+3. If still tied, lowest `best_back` wins (stable deterministic fallback).
+
+Where:
+
+- `primary_centre = (primary_band.min + primary_band.max) / 2`
+- `distance_from_primary_centre_ticks` is the number of Betfair ladder ticks between `best_back` and `primary_centre`.
+
+This ensures:
+- Spread is treated as the dominant execution quality signal.
+- Centrality only differentiates equally tradeable candidates.
+- Behaviour is stable and explainable.
+
+---
+
+### Secondary Band Ordering
+
+Secondary band runners are only considered if anchoring condition is met.
+
+When allowed:
+
+- Secondary runners are ordered using the same logic:
+  1. Lowest spread ticks
+  2. Lowest distance from secondary centre (in ticks)
+  3. Deterministic fallback
+
+However, Primary band candidates always take precedence over Secondary band candidates.
+
+---
+
+### No Numeric Prediction Model
+
+Although a numeric score may be displayed for debugging purposes, it is derived directly from:
+
+- spread_ticks
+- distance_from_centre_ticks
+
+It does not represent probability, confidence, or expected value.
+
+It is purely a sorting mechanism.
+
+---
+
+## 3.7 Debug and Audit Output (Mandatory)
 
 Selection must print:
 
 - Config summary.
 - One row per runner with PASS / FAIL and reason.
+- Spread ticks.
+- Distance from centre in ticks.
 - Stable `selection_summary` line.
 
-This ensures explainability and auditability.
+This ensures:
+- Behaviour changes can be traced to price movement.
+- Threshold effects (band boundaries, spread limits, anchoring) are visible.
+- The system remains explainable and reproducible.
+
 
 ---
 

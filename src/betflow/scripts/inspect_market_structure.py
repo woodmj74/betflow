@@ -47,7 +47,6 @@ def _print_ladder(ladders) -> None:
         print(f"  {num}  {name:<30} {back}  {lay}  {sprd}")
 
 def _print_selection_debug(cfg, metrics, debug_rows, selected) -> None:
-    # ---- Config summary
     sel = cfg.selection
     hard = sel.hard_band
     primary = sel.primary_band
@@ -67,7 +66,7 @@ def _print_selection_debug(cfg, metrics, debug_rows, selected) -> None:
     if top_n_implied is None:
         print(
             f"    secondary_band: {secondary.min:.1f}–{secondary.max:.1f} "
-            f"(allowed if top{top_n} implied >= {secondary.requires_top_n_implied_at_least:.2f}; top{top_n}=? )"
+            f"(allowed if top{top_n} >= {secondary.requires_top_n_implied_at_least:.2f}; top{top_n}=? )"
         )
     else:
         print(
@@ -78,73 +77,60 @@ def _print_selection_debug(cfg, metrics, debug_rows, selected) -> None:
     print(f"    rank_excl:      top {rank_excl.top_n}, bottom {rank_excl.bottom_n}")
     print("")
 
-    # ---- Table header
-    print("  No  Runner                           Back     Lay  Sprd  Rank  Band       Score    Status     Reason")
+    # Header (your requested columns)
+    print("  No  Runner                             Back       Lay  Sprd  Dist  Band       Status     Reason")
     print("  ----------------------------------------------------------------------------------------------------")
 
-    # Ensure stable ordering by price rank
     rows = sorted(debug_rows, key=lambda x: x.price_rank)
+
+    def _num_for(runner, fallback_rank: int) -> str:
+        n = getattr(runner, "runner_number", None)
+        if n is None:
+            return f"{fallback_rank:02d}"
+        try:
+            return f"{int(n):02d}"
+        except Exception:
+            return f"{fallback_rank:02d}"
 
     eligible_count = 0
     for row in rows:
         r = row.runner
-
-        # cloth number if present, otherwise rank-based fallback
-        num_val = getattr(r, "runner_number", None)
-        num = f"{int(num_val):02d}" if num_val is not None else f"{row.price_rank:02d}"
+        num = _num_for(r, row.price_rank)
 
         name = (getattr(r, "name", "") or "")[:30]
 
-        back = f"{r.best_back:>6.2f}" if getattr(r, "best_back", None) else "  -   "
-        lay = f"{r.best_lay:>6.2f}" if getattr(r, "best_lay", None) else "  -   "
+        back = f"{r.best_back:>8.2f}" if getattr(r, "best_back", None) else "  -   "
+        lay = f"{r.best_lay:>8.2f}" if getattr(r, "best_lay", None) else "  -   "
+
         sprd = f"{row.spread_ticks:>4d}" if row.spread_ticks is not None else "  - "
+        dist = f"{row.distance_ticks:>4d}" if row.distance_ticks is not None else "  - "
 
         band = f"{row.band:<9}"
 
-        # Decide eligible by score sentinel
-        is_eligible = row.score > -9000
+        is_eligible = row.score > -9000  # compatibility: eligible rows use 0.0, rejected -9999.0
         status = "ELIGIBLE" if is_eligible else "REJECTED"
         if is_eligible:
             eligible_count += 1
 
-        score = f"{row.score:>7.1f}" if is_eligible else "   -   "
+        reason = (row.reason or "")[:45]
 
-        reason = (row.reason or "")[:40]
-
-        print(f"  {num}  {name:<30} {back:>6}  {lay:>6}  {sprd:>4}  {row.price_rank:>4}  {band}  {score:>7}  {status:<9}  {reason}")
+        print(f"  {num}  {name:<30} {back:>6}  {lay:>6}  {sprd:>4}  {dist:>4}  {band}  {status:<9}  {reason}")
 
     print("")
     print(f"  Eligible runners: {eligible_count}")
 
-    # ---- Selection summary line
     if selected is None:
         print("  → Selected: NONE")
     else:
-        sel_num_val = getattr(selected, "runner_number", None)
-        sel_num = f"{int(sel_num_val):02d}" if sel_num_val is not None else "--"
-        sel_name = getattr(selected, "name", "") or ""
-        sel_back = getattr(selected, "best_back", None)
-        if sel_back is not None:
-            print(f"  → Selected: {sel_num} {sel_name} @ {sel_back:.2f}")
+        n = getattr(selected, "runner_number", None)
+        num = f"{int(n):02d}" if n is not None else "--"
+        nm = getattr(selected, "name", "") or ""
+        bb = getattr(selected, "best_back", None)
+        bl = getattr(selected, "best_lay", None)
+        if bb is not None and bl is not None:
+            print(f"  → Selected: {num} {nm}  ({bb:.2f}/{bl:.2f})")
         else:
-            print(f"  → Selected: {sel_num} {sel_name}")
-
-    # ---- Diff-friendly single-line summary
-    if top_n_implied is None:
-        anchored_txt = "anchored_ok=?"
-        topn_txt = f"top{top_n}=?"
-    else:
-        anchored_txt = f"anchored_ok={'YES' if anchored_ok else 'NO'}"
-        topn_txt = f"top{top_n}={top_n_implied:.2f}"
-
-    if selected is None:
-        print(f"  selection_summary: selected=NONE {anchored_txt} {topn_txt} eligible={eligible_count}")
-    else:
-        sel_num_val = getattr(selected, "runner_number", None)
-        sel_num = f"{int(sel_num_val):02d}" if sel_num_val is not None else "--"
-        sel_back = getattr(selected, "best_back", None)
-        back_txt = f"@{sel_back:.2f}" if sel_back is not None else ""
-        print(f"  selection_summary: selected={sel_num}{back_txt} {anchored_txt} {topn_txt} eligible={eligible_count}")
+            print(f"  → Selected: {num} {nm}")
 
 
 def inspect_one_market(client: BetfairClient, market_id: str, filters_path: str) -> None:

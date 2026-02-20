@@ -1,101 +1,372 @@
-# Betflow – Project Map
+Betflow Trading Implementation
 
-This is the “how to think about the repo” document.
+Version: 0.2
+Status: Working Design Notes (aligned to deterministic implementation)
 
-If `docs/STATE.md` is *what we have and how to run it*, this is *what each part means and how the pieces interact*.
+This document describes the step-by-step implementation flow Betflow uses to move from “markets on Betfair” to “one selected runner (or no selection)”.
 
-## The big idea
-Betflow is a research-oriented Betfair Exchange platform with paper trading first.
+This is an implementation document.
+It explains how configuration interacts with execution.
 
-We build in small steps:
-- add one capability
-- add a proof script
-- only then build the next layer
+0. Inputs and Configuration
+0.1 Configuration Source
 
-## Key layers
+Config is loaded from config/filters.yaml via load_filter_config().
 
-### 1) Scripts (entry points)
-**Where you run things from the command line.**  
-Scripts should be simple: load config, call services, print human-friendly output.
+Config is treated as the single source of truth.
 
-- `betflow.scripts.test_connection`
-  - Proves login + one JSON-RPC call
-- `betflow.scripts.test_session_retry`
-  - Proves session expiry recovery (re-login + retry once)
-- `betflow.scripts.discover_markets`
-  - Finds the next N WIN markets and prints pass/fail reasons
+No thresholds are hardcoded in scripts.
 
-### 2) Services (business logic you’ll reuse)
-**Where the actual “logic” lives.**  
-Services should return structured data, not print.
+0.2 Core Configuration Areas
+Global
 
-- `services/market_discovery.py`
-  - Discovers markets (Horse Racing, WIN)
-  - Applies Phase 1 eligibility gates:
-    - runner count range
-    - liquidity threshold (region-aware)
-  - Returns decisions: eligible/rejected + reasons
+global.horizon_hours
 
-Later services will include:
-- `services/market_ladder.py`
-  - Builds a ladder view from `listMarketBook` (best back/lay, spread ticks)
-- `services/runner_selection.py`
-  - Applies odds-band harvesting rules (~12–18), spread thresholds, guard rails
-- `services/paper_trading.py`
-  - Simulates orders, outcomes, P&L, and produces audit events
+global.take
 
-### 3) Betfair client (gateway)
-**The only thing that talks to Betfair.**
+global.defaults.runner_count
 
-- `betfair/client.py` (`BetfairClient`)
-  - cert login
-  - JSON-RPC calls
-  - session retry once on `INVALID_SESSION_INFORMATION`
+global.defaults.liquidity_min
 
-Rule: Services call the client. Scripts call services.  
-No other file should “wing it” with raw HTTP requests.
+Regions
 
-### 4) Configuration
-**No hard-coded thresholds in code.**
+market_countries
 
-- `config/filters.yaml`
-  - Global defaults (runner range, liquidity, horizon, take)
-  - Region blocks that can override defaults
+optional runner count overrides
 
-- `filter_config.py`
-  - Loads YAML into typed config objects
-  - Provides helper methods like:
-    - “what’s liquidity_min for region X?”
-    - “what runner range applies here?”
+optional liquidity overrides
 
-## Typical flow (today)
+Structure Gates
 
-```mermaid
-flowchart LR
-  A[discover_markets.py] --> B[load_filter_config]
-  A --> C[MarketDiscovery service]
-  C --> D[BetfairClient.rpc]
-  D --> E[Betfair API]
-  C --> A
+anchor
 
+soup
 
----
+tier
 
-## 2️⃣ PROJECT_MAP.md Update
+Selection
 
-We keep this shorter — this is architecture view, not narrative.
+hard_band
 
-Add under Phase 2:
+primary_band
 
-```markdown
-### Phase 2 – Market Structure
+secondary_band
 
-inspect_market_structure.py
-  - Uses BetfairClient.rpc()
-  - Loads filter_config
-  - Produces diagnostic ladder view
-  - Calculates basic structural metrics
+max_spread_ticks
 
-No selection logic yet.
-No persistence.
-No staking.
+rank_exclusion.top_n
+
+rank_exclusion.bottom_n
+
+1. Market Discovery (Pre-Structure)
+
+Goal: Identify candidate WIN markets for structural inspection.
+
+Implemented in:
+
+services/market_discovery.py
+
+scripts/discover_markets.py
+
+1.1 Time Window
+
+Pull Horse Racing WIN markets.
+
+Restrict by configured countries.
+
+Restrict to global.horizon_hours.
+
+Take next global.take markets by start time.
+
+No runner logic occurs here.
+
+1.2 Region Mapping
+
+Each market is mapped to a configured region via:
+
+market.event.countryCode
+
+If no region matches → MARKET REJECTED.
+
+1.3 Runner Count Gate
+
+Reject if:
+
+runner_count < min OR runner_count > max
+
+Range resolution:
+
+Region override if present
+
+Else global default
+
+Purpose:
+
+Avoid very small fields.
+
+Avoid excessively large, unstable markets.
+
+1.4 Liquidity Gate
+
+Reject if:
+
+totalMatched < liquidity_min
+
+Threshold resolution:
+
+Region override if present
+
+Else global default
+
+Purpose:
+
+Avoid thin markets.
+
+Avoid unstable spreads.
+
+2. Market Inspection (Stage 1 — Structural Gate)
+
+Goal: Determine if the market is structurally tradable.
+
+Implemented in:
+
+markets.structure_metrics
+
+markets.market_rules
+
+scripts.inspect_market_structure
+
+2.1 Ladder Construction
+
+From:
+
+MarketCatalogue (runner metadata)
+
+MarketBook (best prices)
+
+We build RunnerLadder objects containing:
+
+best_back
+
+best_lay
+
+spread_ticks
+
+runner name
+
+runner number
+
+Tick modelling follows Betfair ladder bands.
+
+2.2 Structure Metrics
+
+Computed metrics include:
+
+top_n_implied_sum
+
+soup_band_ratio
+
+tier_max_adjacent_ratio
+
+These describe shape only — no narrative interpretation.
+
+2.3 Structure Gates
+
+Gates are evaluated in fixed order:
+
+Anchor gate
+
+Soup gate
+
+Tier gate
+
+Any failure → MARKET REJECTED
+All pass → MARKET ACCEPTED
+
+Only accepted markets proceed to selection.
+
+3. Runner Selection (Stage 2)
+
+Selection is deterministic and purely structural.
+
+Implemented in:
+
+select_candidate_runner(...)
+
+3.1 Gate Order (Intentional and Preserved)
+
+For each runner (sorted by best_back ascending):
+
+Missing back/lay
+
+Hard band
+
+Spread gate
+
+Rank exclusion
+
+Band classification (Primary / Secondary)
+
+Gate order is intentional.
+
+The first failing rule defines the primary rejection reason.
+Rank exclusion may be appended as diagnostic context.
+
+3.2 Hard Band
+
+Reject if:
+
+best_back outside selection.hard_band
+
+Purpose:
+
+Define strategy identity.
+
+Prevent drift into unwanted odds regimes.
+
+3.3 Spread Gate
+
+Reject if:
+
+spread_ticks > selection.max_spread_ticks
+
+Purpose:
+
+Maintain execution quality.
+
+Avoid unstable price ladders.
+
+3.4 Rank Exclusion
+
+After spread passes:
+
+Exclude:
+
+Top rank_exclusion.top_n favourites
+
+Bottom rank_exclusion.bottom_n outsiders
+
+Price rank is assigned BEFORE exclusions.
+
+Rank exclusion:
+
+Removes runners from eligibility.
+
+Does NOT alter structural ordering logic.
+
+May be annotated in debug output.
+
+Purpose:
+
+Avoid favourites-adjacent runners.
+
+Avoid deep tail rags.
+
+Focus on structural mid-field.
+
+3.5 Primary vs Secondary Band
+
+Primary band:
+
+selection.primary_band
+
+Secondary band:
+
+selection.secondary_band
+
+Secondary eligibility requires:
+
+top_n_implied_sum >= secondary.requires_top_n_implied_at_least
+
+If anchoring condition fails → secondary rejected.
+
+Primary candidates always take precedence over secondary.
+
+3.6 Deterministic Ordering (No Scoring Model)
+
+There is no scoring model.
+
+Ordering rule for eligible candidates:
+
+Lowest spread_ticks
+
+Lowest distance_ticks
+
+Lowest best_back
+
+Distance is calculated as:
+
+round(abs(price - band_midpoint) / tick_size(price))
+
+Distance is rounded to nearest whole tick.
+
+This avoids fractional tick debates and preserves explainability.
+
+Exactly one runner is selected.
+If none eligible → no selection.
+
+3.7 Debug Output Contract
+
+Selection output must show:
+
+Band
+
+Spread (ticks)
+
+Distance (ticks)
+
+Status (ELIGIBLE / REJECTED)
+
+Explicit rejection reason
+
+Final selection summary
+
+No numeric predictive score is used.
+
+Debug output must allow:
+
+Reproducibility
+
+Clear explanation of behaviour
+
+Visibility into threshold interactions
+
+4. Behavioural Guarantees
+
+No session P/L awareness
+
+No chasing logic
+
+Fixed risk unit model (future phase)
+
+One entry per market
+
+Deterministic behaviour given identical prices
+
+5. Non-Goals (Current Phase)
+
+Not implemented:
+
+Paper betting engine
+
+Persistence layer
+
+Live order placement
+
+Volatility modelling
+
+Multi-runner selection
+
+Future phases must preserve structural integrity.
+
+6. Commands
+
+Discovery:
+
+python -m betflow.scripts.discover_markets
+
+Inspection + Selection:
+
+python -m betflow.scripts.inspect_market_structure <market_id>
+
+End of Document.
