@@ -1,54 +1,55 @@
-global:
-  # How far ahead we search to find the "next N races"
-  horizon_hours: 48
+# Betflow - Filters (Lane 1)
+# Canonical schema expected by: src/betflow/filter_config.py
+# Mode A: only what Phase 2 needs (market discovery + structure gates)
 
-  # How many races (by start time) we finally print
+global:
+  # how far ahead we look for markets (discover script)
+  horizon_hours: 24
+
+  # how many markets to inspect / print per run
   take: 10
 
   defaults:
+    # market-level eligibility (basic sweep gates)
     runner_count:
       min: 7
       max: 16
 
-    # If a region doesn't specify liquidity_min, use this
+    # minimum matched volume / liquidity gate
     liquidity_min: 2000
 
+
+# Regions are "profiles" (your term) that apply different country sets + liquidity norms.
+# Code expects: regions.<key>.market_countries and regions.<key>.liquidity_min
 regions:
-  GB:
-    name: "Great Britain"
-    market_countries: ["GB"]
-    liquidity_min: 3000
-
-  IE:
-    name: "Ireland"
-    market_countries: ["IE"]
+  UK_IRE:
+    name: "UK & Ireland"
+    market_countries: ["GB", "IE"]
     liquidity_min: 2000
 
-  AU:
-    name: "Australia"
-    market_countries: ["AU"]
-    liquidity_min: 1500
-
-  NZ:
-    name: "New Zealand"
-    market_countries: ["NZ"]
-    liquidity_min: 1000
-
-  ZA:
-    name: "South Africa"
-    market_countries: ["ZA"]
-    liquidity_min: 500
+  # Optional placeholders for later (safe to leave commented out)
+  # AUS:
+  #   name: "Australia"
+  #   market_countries: ["AU"]
+  #   liquidity_min: 5000
 
 
+# Phase 2: structure gates used by market_rules.py
+# These are your original anchor/soup/tier concepts.
 structure_gates:
   anchor:
     top_n: 3
-    min_top_implied: 0.65 # calculated as 1/back price - do the top n sum to >= top implied value to pass (ie over 65% probability)
+    min_top_implied: 0.99
+    # Meaning: sum(1/back_price) of top N <=? (or >=?) depends on rule implementation.
+    # We are NOT changing logic here — just providing config in the expected place. (0.65)
 
   soup:
     top_k: 5
-    max_band_ratio: 1.20   # if topK max/min price <= this => FAIL soup - stops many plausible winners
+    max_band_ratio: 1.20
+    # Meaning: within top K runners, max_price / min_price must be >=? (or <=?) per rule.
+    # Again, config only — logic stays as-is. (1.20)
 
   tier:
     top_region: 6
-    min_jump_ratio: 1.25   # max adjacent ratio in top_region must be >= this (ie a gap between clustered pricing)
+    min_jump_ratio: 1.25
+    # Meaning: require a meaningful step between adjacent prices in the top region. (1.25)

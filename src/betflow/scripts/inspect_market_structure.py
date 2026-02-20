@@ -26,8 +26,8 @@ def _print_rule_results(rule_results) -> None:
 def _print_ladder(ladders) -> None:
     print("")
     print("[LADDER]  (best back/lay)")
-    print("  No  Runner                           Back     Lay   Sprd(t)")
-    print("  ----------------------------------------------------------")
+    print("  No  Runner                           Back       Lay    Sprd(t)")
+    print("  ----------------------------------------------------------------")
 
     for idx, r in enumerate(ladders, start=1):
         # Prefer cloth number if available; otherwise fall back to row index.
@@ -36,9 +36,9 @@ def _print_ladder(ladders) -> None:
         else:
             num = f"{idx:02d}"
 
-        back = f"{r.best_back:>6.2f}" if r.best_back else "   -  "
-        lay = f"{r.best_lay:>6.2f}" if r.best_lay else "   -  "
-        sprd = f"{r.spread_ticks:>6d}" if r.spread_ticks is not None else "   -  "
+        back = f"{r.best_back:>8.2f}" if r.best_back else "   -  "
+        lay = f"{r.best_lay:>8.2f}" if r.best_lay else "   -  "
+        sprd = f"{r.spread_ticks:>8d}" if r.spread_ticks is not None else "   -  "
 
         name = (getattr(r, "name", "") or "")[:30]
         print(f"  {num}  {name:<30} {back}  {lay}  {sprd}")
@@ -81,13 +81,17 @@ def inspect_one_market(client: BetfairClient, market_id: str, filters_path: Opti
     market_name = market_catalogue.get("marketName", "")
     start_time = _fmt_dt(market_catalogue.get("marketStartTime", ""))
     country = (market_catalogue.get("event", {}) or {}).get("countryCode")
+    venue = (market_catalogue.get("event", {}) or {}).get("venue")
 
     print("")
     print("[MARKET]")
     print(f"  id: {market_id} - {market_name}")
     print(f"  Start: {start_time}")
+    if venue:
+        print(f"  Venue: {venue}")
     print(f"  Country: {country or '?'}")
-    print("")
+
+
 
     # --- Build ladders + metrics (always)
     ladders = build_runner_ladders(market_catalogue, market_book)
@@ -101,11 +105,14 @@ def inspect_one_market(client: BetfairClient, market_id: str, filters_path: Opti
         cfg=cfg,
     )
 
-    print("[VALIDATION]")
     if region_code and region_code in cfg.regions:
         print(f"  Region: {region_code} ({cfg.regions[region_code].name})")
     else:
         print("  Region: -")
+    print("")
+
+    print("[VALIDATION]")
+
     _print_rule_results(rule_results)
 
     # --- Ladder (always)

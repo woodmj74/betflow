@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict, is_dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from betflow.filter_config import FilterConfig
 from betflow.markets.structure_metrics import MarketStructureMetrics
+
 
 
 # ----------------------------
@@ -74,7 +75,12 @@ def evaluate_market_rules(
     results: List[RuleResult] = []
 
     # Support both dataclass and pydantic-ish configs
-    cfg_dict = cfg.dict() if hasattr(cfg, "dict") else cfg.__dict__
+    if hasattr(cfg, "dict"):
+        cfg_dict = cfg.dict()
+    elif is_dataclass(cfg):
+        cfg_dict = asdict(cfg)
+    else:
+        cfg_dict = cfg.__dict__
 
     country = (market_catalogue.get("event", {}) or {}).get("countryCode")
     region_code = _region_for_country(cfg, country)

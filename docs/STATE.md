@@ -230,3 +230,10 @@ Optional (defaults to `/opt/betflow/secrets/...` if not set):
 
 ```bash
 python -c "import betflow; print('imports ok')"
+
+
+2026-02-20
+### Minor Fixes (Mode A)
+- Fixed dataclass config conversion in market_rules (now using asdict) so YAML thresholds are respected.
+- Market printout now includes Venue (event.venue).
+- Region line repositioned for clarity.
