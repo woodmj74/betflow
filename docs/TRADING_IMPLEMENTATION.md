@@ -231,6 +231,8 @@ Purpose:
 
 ## 3.5 Rank Exclusion (Mid-Field Bias)
 
+Rank exclusion may be static (fixed top_n/bottom_n) or dynamic (resolved via field-size rules). Only the resolved exclusion is applied and printed.
+
 - Assign `price_rank` (1 = favourite).
 - Exclude:
   - Top `rank_exclusion.top_n`

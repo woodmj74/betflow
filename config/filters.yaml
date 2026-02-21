@@ -11,7 +11,7 @@ global:
     # market-level eligibility (basic sweep gates)
     runner_count:
       min: 6
-      max: 16
+      max: 25
 
     # minimum matched volume / liquidity gate
     liquidity_min: 2000
@@ -35,7 +35,7 @@ regions:
 structure_gates:
   anchor:
     top_n: 3
-    min_top_implied: 0.50
+    min_top_implied: 0.20
     # Meaning: sum(1/back_price) of top N <=? (or >=?) depends on rule implementation.
     # We are NOT changing logic here — just providing config in the expected place. (0.65)
 
@@ -60,7 +60,7 @@ selection:
   primary_band:
     min: 13.0
     max: 20.0
-    target_price: 14.0
+    target_price: 16.0
 
   # Secondary zone: allowed only when the market is strongly anchored
   secondary_band:
@@ -75,5 +75,15 @@ selection:
 
   # Rank exclusion (B2): avoid favourites-adjacent and total rags
   rank_exclusion:
+    rules:
+      - max_field_size: 12
+        top_n: 3
+        bottom_n: 2
+      - max_field_size: 20
+        top_n: 6
+        bottom_n: 3
+      - max_field_size: 99
+        top_n: 8
+        bottom_n: 4
     top_n: 4
-    bottom_n: 0    
+    bottom_n: 2    

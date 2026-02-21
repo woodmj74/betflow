@@ -121,9 +121,31 @@ class SecondaryBand:
     target_price: Optional[float] = None
 
 @dataclass(frozen=True)
+class RankExclusionRule:
+    max_field_size: int
+    top_n: int
+    bottom_n: int
+
+
+@dataclass(frozen=True)
 class RankExclusion:
     top_n: int
     bottom_n: int
+    rules: Optional[List[RankExclusionRule]] = None
+
+    def resolve(self, active_runner_count: int) -> tuple[int, int, str]:
+        """Resolve rank exclusions for a given ACTIVE runner count.
+
+        Returns: (top_n, bottom_n, mode_label)
+          - mode_label is "static" or "dynamic"
+        """
+        n = max(int(active_runner_count), 0)
+        if self.rules:
+            # First matching rule wins (rules should be ordered smallest->largest max_field_size)
+            for rule in self.rules:
+                if n <= int(rule.max_field_size):
+                    return int(rule.top_n), int(rule.bottom_n), "dynamic"
+        return int(self.top_n), int(self.bottom_n), "static"
 
 @dataclass(frozen=True)
 class SelectionConfig:
@@ -220,6 +242,22 @@ def load_filter_config(path: Optional[PathLike] = None) -> FilterConfig:
     secondary_raw = sel.get("secondary_band", {}) or {}
     rank_raw = sel.get("rank_exclusion", {}) or {}
 
+    rules_raw = rank_raw.get("rules") or None
+    rules: Optional[List[RankExclusionRule]] = None
+    if isinstance(rules_raw, list):
+        parsed: List[RankExclusionRule] = []
+        for rr in rules_raw:
+            if not isinstance(rr, dict):
+                continue
+            parsed.append(
+                RankExclusionRule(
+                    max_field_size=int(rr.get("max_field_size", 9999)),
+                    top_n=int(rr.get("top_n", 0)),
+                    bottom_n=int(rr.get("bottom_n", 0)),
+                )
+            )
+        rules = parsed or None
+
     selection_cfg = SelectionConfig(
         hard_band=OddsBand(
             min=float(hard_raw.get("min", 12.0)),
@@ -241,6 +279,7 @@ def load_filter_config(path: Optional[PathLike] = None) -> FilterConfig:
         rank_exclusion=RankExclusion(
             top_n=int(rank_raw.get("top_n", 2)),
             bottom_n=int(rank_raw.get("bottom_n", 2)),
+            rules=rules,
         ),
     )
 

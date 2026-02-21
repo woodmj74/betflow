@@ -149,8 +149,8 @@ def select_candidate_runner(
     secondary = cfg.selection.secondary_band
     max_spread = int(cfg.selection.max_spread_ticks)
 
-    top_excl = int(cfg.selection.rank_exclusion.top_n)
-    bot_excl = int(cfg.selection.rank_exclusion.bottom_n)
+    total = len(rows)
+    top_excl, bot_excl, _excl_mode = cfg.selection.rank_exclusion.resolve(total)
 
     debug: list[RunnerSelectionRow] = []
     eligible_primary: list[RunnerSelectionRow] = []

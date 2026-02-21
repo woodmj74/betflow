@@ -46,12 +46,8 @@ def _print_ladder(ladders) -> None:
         name = (getattr(r, "name", "") or "")[:30]
         print(f"  {num}  {name:<30} {back}  {lay}  {sprd}")
 
-def _fmt_band(label: str, band, target: float | None) -> str:
-    if target is not None:
-        return f"{label:<11} {band.min:>6.2f} → [{target:>6.2f}] ← {band.max:>6.2f}"
-    return f"{label:<11} {band.min:>6.2f}            {band.max:>6.2f}"
 
-def _print_selection_debug(cfg, metrics, debug_rows, selected) -> None:
+def _print_selection_debug(cfg, metrics, debug_rows, selected, active_count: int) -> None:
     sel = cfg.selection
     hard = sel.hard_band
     primary = sel.primary_band
@@ -92,9 +88,9 @@ def _print_selection_debug(cfg, metrics, debug_rows, selected) -> None:
     threshold = float(cfg.selection.secondary_band.requires_top_n_implied_at_least)
     actual = metrics.top_n_implied_sum
 
-    active = actual >= threshold
-    flag = "YES" if active else "NO"
-    symbol = "≥" if active else "<"
+    secondary_active = actual >= threshold
+    flag = "YES" if secondary_active else "NO"
+    symbol = "≥" if secondary_active else "<"
 
     print("")
     print(
@@ -103,10 +99,12 @@ def _print_selection_debug(cfg, metrics, debug_rows, selected) -> None:
     )
 
     print(f"    Max Spread:      {cfg.selection.max_spread_ticks} ticks")
+    top_excl, bot_excl, mode = cfg.selection.rank_exclusion.resolve(active_count)
+
     print(
         f"    Rank Exclusion:  "
-        f"Top {cfg.selection.rank_exclusion.top_n} / "
-        f"Bottom {cfg.selection.rank_exclusion.bottom_n}"
+        f"Top {top_excl} / Bottom {bot_excl} "
+        f"({mode})"
     )
     print("")
 
@@ -233,6 +231,7 @@ def inspect_one_market(client: BetfairClient, market_id: str, filters_path: str)
 
     # --- Build ladders + metrics (always)
     ladders = build_runner_ladders(market_catalogue, market_book)
+    active_count = len(ladders)
     metrics = compute_market_structure_metrics(
         ladders,
         anchor_top_n=cfg.structure_gates.anchor.top_n,
@@ -271,7 +270,13 @@ def inspect_one_market(client: BetfairClient, market_id: str, filters_path: str)
             metrics=metrics,
             cfg=cfg,
         )
-        _print_selection_debug(cfg=cfg, metrics=metrics, debug_rows=debug_rows, selected=selected)
+        _print_selection_debug(
+            cfg=cfg,
+            metrics=metrics,
+            debug_rows=debug_rows,
+            selected=selected,
+            active_count=active_count,
+        )
         
     print("")
     print("[DECISION]")

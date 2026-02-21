@@ -272,4 +272,16 @@ No architecture drift.
 
 ---
 
+2026-02-21 – Selection Engine Refinement
+
+  Rank exclusion now supports dynamic rules based on ACTIVE runner count
+  Only the resolved exclusion is printed (Top X / Bottom Y (dynamic|static))
+  ACTIVE runners (status == ACTIVE) are the sole source of truth for:
+  Field size
+  Structure metrics
+  Rank exclusion
+  Selection ordering
+  _print_selection_debug() cleaned to remove duplicate helpers
+  No architectural change. Single-path evolution maintained.
+
 End of STATE.
