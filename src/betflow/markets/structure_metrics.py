@@ -22,6 +22,10 @@ _TICK_BANDS: list[tuple[float, float, float]] = [
     (100.00, 1000.00, 10.00),
 ]
 
+def _in_band(price: float | None, band) -> bool:
+    if price is None:
+        return False
+    return band.min <= price <= band.max
 
 def tick_size(price: float) -> float:
     p = float(price)
@@ -154,8 +158,13 @@ def select_candidate_runner(
 
     total = len(rows)
 
-    primary_centre = (primary.min + primary.max) / 2.0
-    secondary_centre = (secondary.min + secondary.max) / 2.0
+    primary_target = getattr(primary, "target_price", None)
+    if primary_target is None:
+        primary_target = (primary.min + primary.max) / 2.0
+
+    secondary_target = getattr(secondary, "target_price", None)
+    if secondary_target is None:
+        secondary_target = (secondary.min + secondary.max) / 2.0
 
     for idx, r in enumerate(rows, start=1):
         st = r.spread_ticks
@@ -182,12 +191,31 @@ def select_candidate_runner(
             debug.append(RunnerSelectionRow(r, idx, "-", st, None, -9999.0, reason))
             continue
 
+        # Hard band guardrail must also apply to LAY (execution boundary)
+        if not (hard.min <= r.best_lay <= hard.max):
+            reason = f"outside hard band (lay {r.best_lay:.2f} not in [{hard.min:g}–{hard.max:g}])"
+            if rank_tag:
+                reason = f"{reason}; {rank_tag}"
+            debug.append(RunnerSelectionRow(r, idx, "-", st, None, -9999.0, reason))
+            continue
+
+        # Determine structural band first (based on BACK only)
+        in_primary = primary.min <= r.best_back <= primary.max
+        in_secondary = secondary.min <= r.best_back <= secondary.max
+
+        if in_primary:
+            structural_band = "PRIMARY"
+        elif in_secondary and anchored_ok:
+            structural_band = "SECONDARY"
+        else:
+            structural_band = "HARD"
+
         # Spread gate
         if st is None or st > max_spread:
             reason = f"spread {st} > {max_spread}"
             if rank_tag:
                 reason = f"{reason}; {rank_tag}"
-            debug.append(RunnerSelectionRow(r, idx, "HARD", st, None, -9999.0, reason))
+            debug.append(RunnerSelectionRow(r, idx, structural_band, st, None, -9999.0, reason))
             continue
 
         # Rank exclusion
@@ -202,14 +230,14 @@ def select_candidate_runner(
         in_secondary = secondary.min <= r.best_back <= secondary.max
 
         if in_primary:
-            dt = _distance_ticks(r.best_back, primary_centre)
+            dt = _distance_ticks(r.best_back, primary_target)
             row = RunnerSelectionRow(r, idx, "PRIMARY", st, dt, 0.0, "in primary band")
             eligible_primary.append(row)
             debug.append(row)
             continue
 
         if anchored_ok and in_secondary:
-            dt = _distance_ticks(r.best_back, secondary_centre)
+            dt = _distance_ticks(r.best_back, secondary_target)
             row = RunnerSelectionRow(r, idx, "SECONDARY", st, dt, 0.0, "secondary allowed (anchored)")
             eligible_secondary.append(row)
             debug.append(row)
@@ -282,6 +310,11 @@ def build_runner_ladders(market_catalogue: dict, market_book: dict) -> list[Runn
 
     out: list[RunnerLadder] = []
     for rb in (market_book.get("runners") or []):
+        # ACTIVE only: exclude non-runners (REMOVED, etc.) from ladders and
+        # downstream field-size logic.
+        if rb.get("status") != "ACTIVE":
+            continue
+
         sid = int(rb.get("selectionId"))
         ex = rb.get("ex") or {}
         best_back = _best_price(ex, "availableToBack")

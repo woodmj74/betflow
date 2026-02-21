@@ -46,6 +46,11 @@ def _print_ladder(ladders) -> None:
         name = (getattr(r, "name", "") or "")[:30]
         print(f"  {num}  {name:<30} {back}  {lay}  {sprd}")
 
+def _fmt_band(label: str, band, target: float | None) -> str:
+    if target is not None:
+        return f"{label:<11} {band.min:>6.2f} → [{target:>6.2f}] ← {band.max:>6.2f}"
+    return f"{label:<11} {band.min:>6.2f}            {band.max:>6.2f}"
+
 def _print_selection_debug(cfg, metrics, debug_rows, selected) -> None:
     sel = cfg.selection
     hard = sel.hard_band
@@ -60,21 +65,49 @@ def _print_selection_debug(cfg, metrics, debug_rows, selected) -> None:
     if top_n_implied is not None:
         anchored_ok = top_n_implied >= secondary.requires_top_n_implied_at_least
 
-    print("  Config:")
-    print(f"    hard_band:      {hard.min:.1f}–{hard.max:.1f}")
-    print(f"    primary_band:   {primary.min:.1f}–{primary.max:.1f}")
-    if top_n_implied is None:
-        print(
-            f"    secondary_band: {secondary.min:.1f}–{secondary.max:.1f} "
-            f"(allowed if top{top_n} >= {secondary.requires_top_n_implied_at_least:.2f}; top{top_n}=? )"
-        )
-    else:
-        print(
-            f"    secondary_band: {secondary.min:.1f}–{secondary.max:.1f} "
-            f"(allowed: {'YES' if anchored_ok else 'NO'}; top{top_n}={top_n_implied:.2f} >= {secondary.requires_top_n_implied_at_least:.2f})"
-        )
-    print(f"    max_spread:     {sel.max_spread_ticks} ticks")
-    print(f"    rank_excl:      top {rank_excl.top_n}, bottom {rank_excl.bottom_n}")
+    print("")
+    print("  Configuration:")
+    print("    Bands:")
+
+    primary = cfg.selection.primary_band
+    secondary = cfg.selection.secondary_band
+    hard = cfg.selection.hard_band
+
+    primary_target = primary.target_price
+    secondary_target = secondary.target_price
+
+    def _fmt_band(label: str, band, target: float | None) -> str:
+        if target is not None:
+            mid = f" → [{target:>6.2f}] ← "
+        else:
+            mid = " → [  --  ] ← "
+        return f"{label:<12}{band.min:>6.2f}{mid}{band.max:>6.2f}"
+
+    print("      " + _fmt_band("Primary:", primary, primary_target))
+    print("      " + _fmt_band("Secondary:", secondary, secondary_target))
+    print("      " + _fmt_band("Hard:", hard, None))
+
+    # Secondary activation explanation
+    top_n = int(cfg.structure_gates.anchor.top_n)
+    threshold = float(cfg.selection.secondary_band.requires_top_n_implied_at_least)
+    actual = metrics.top_n_implied_sum
+
+    active = actual >= threshold
+    flag = "YES" if active else "NO"
+    symbol = "≥" if active else "<"
+
+    print("")
+    print(
+        f"    Secondary Active: {flag} "
+        f"(Top {top_n} implied = {actual:.2f} {symbol} {threshold:.2f})"
+    )
+
+    print(f"    Max Spread:      {cfg.selection.max_spread_ticks} ticks")
+    print(
+        f"    Rank Exclusion:  "
+        f"Top {cfg.selection.rank_exclusion.top_n} / "
+        f"Bottom {cfg.selection.rank_exclusion.bottom_n}"
+    )
     print("")
 
     # Header (your requested columns)
@@ -99,22 +132,32 @@ def _print_selection_debug(cfg, metrics, debug_rows, selected) -> None:
 
         name = (getattr(r, "name", "") or "")[:30]
 
-        back = f"{r.best_back:>8.2f}" if getattr(r, "best_back", None) else "  -   "
-        lay = f"{r.best_lay:>8.2f}" if getattr(r, "best_lay", None) else "  -   "
+        back = f"{r.best_back:>8.2f}" if getattr(r, "best_back", None) is not None else f"{'-':>8}"
+        lay = f"{r.best_lay:>8.2f}" if getattr(r, "best_lay", None) is not None else f"{'-':>8}"
 
-        sprd = f"{row.spread_ticks:>4d}" if row.spread_ticks is not None else "  - "
-        dist = f"{row.distance_ticks:>4d}" if row.distance_ticks is not None else "  - "
+        sprd = f"{row.spread_ticks:>4d}" if row.spread_ticks is not None else f"{'-':>4}"
+        dist = f"{row.distance_ticks:>4d}" if row.distance_ticks is not None else f"{'-':>4}"
 
         band = f"{row.band:<9}"
 
-        is_eligible = row.score > -9000  # compatibility: eligible rows use 0.0, rejected -9999.0
+        is_eligible = row.score > -9000
         status = "ELIGIBLE" if is_eligible else "REJECTED"
         if is_eligible:
             eligible_count += 1
 
         reason = (row.reason or "")[:45]
 
-        print(f"  {num}  {name:<30} {back:>6}  {lay:>6}  {sprd:>4}  {dist:>4}  {band}  {status:<9}  {reason}")
+        print(
+            f"  {num}  "
+            f"{name:<30}  "
+            f"{back}  "
+            f"{lay}  "
+            f"{sprd}  "
+            f"{dist}  "
+            f"{band}  "
+            f"{status:<9}  "
+            f"{reason}"
+        )
 
     print("")
     print(f"  Eligible runners: {eligible_count}")
@@ -179,6 +222,14 @@ def inspect_one_market(client: BetfairClient, market_id: str, filters_path: str)
     if venue:
         print(f"  Venue: {venue}")
     print(f"  Country: {country or '?'}")
+    # Runner status summary (we exclude non-ACTIVE runners from ladders / selection)
+    book_runners = market_book.get("runners") or []
+    non_active = sum(1 for rb in book_runners if rb.get("status") != "ACTIVE")
+    active = len(book_runners) - non_active
+    if non_active:
+        print(f"  Runners: {active} ACTIVE ({non_active} non-runners excluded)")
+    else:
+        print(f"  Runners: {active} ACTIVE (zero non-runners)")
 
     # --- Build ladders + metrics (always)
     ladders = build_runner_ladders(market_catalogue, market_book)
@@ -204,29 +255,24 @@ def inspect_one_market(client: BetfairClient, market_id: str, filters_path: str)
     print("")
 
     print("[VALIDATION]")
-
     _print_rule_results(rule_results)
 
-    # --- Ladder (always)
-    _print_ladder(ladders)
-
-    # --- Selection (only if market accepted)
-    print("")
-    print("")
-    print("[SELECTION]")
-
-    if accepted:
+    if not accepted:
+        # Only show ladder when market fails validation, so we can see what the rules were applied to.
+        _print_ladder(ladders)
+        print("")
+        print("[SELECTION]")
+        print("  → Market rejected — no runner considered")
+    else:
+        print("")
+        print("[SELECTION]")
         selected, debug_rows = select_candidate_runner(
             ladders=ladders,
             metrics=metrics,
             cfg=cfg,
         )
-
         _print_selection_debug(cfg=cfg, metrics=metrics, debug_rows=debug_rows, selected=selected)
-
-    else:
-        print("  → Market rejected — no runner considered")
-
+        
     print("")
     print("[DECISION]")
     print(f"  → MARKET {'ACCEPTED' if accepted else 'REJECTED'}")

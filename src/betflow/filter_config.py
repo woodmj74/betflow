@@ -110,10 +110,15 @@ class FilterConfig:
 class OddsBand:
     min: float
     max: float
+    target_price: Optional[float] = None
+
 
 @dataclass(frozen=True)
-class SecondaryBand(OddsBand):
+class SecondaryBand:
+    min: float
+    max: float
     requires_top_n_implied_at_least: float
+    target_price: Optional[float] = None
 
 @dataclass(frozen=True)
 class RankExclusion:
@@ -219,15 +224,18 @@ def load_filter_config(path: Optional[PathLike] = None) -> FilterConfig:
         hard_band=OddsBand(
             min=float(hard_raw.get("min", 12.0)),
             max=float(hard_raw.get("max", 18.0)),
+            target_price=(float(hard_raw["target_price"]) if "target_price" in hard_raw and hard_raw["target_price"] is not None else None),
         ),
         primary_band=OddsBand(
             min=float(primary_raw.get("min", 14.0)),
             max=float(primary_raw.get("max", 17.0)),
+            target_price=(float(primary_raw["target_price"]) if "target_price" in primary_raw and primary_raw["target_price"] is not None else None),
         ),
         secondary_band=SecondaryBand(
             min=float(secondary_raw.get("min", 12.0)),
             max=float(secondary_raw.get("max", 14.0)),
             requires_top_n_implied_at_least=float(secondary_raw.get("requires_top_n_implied_at_least", 0.70)),
+            target_price=(float(secondary_raw["target_price"]) if "target_price" in secondary_raw and secondary_raw["target_price"] is not None else None),
         ),
         max_spread_ticks=int(sel.get("max_spread_ticks", 5)),
         rank_exclusion=RankExclusion(
