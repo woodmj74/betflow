@@ -205,7 +205,7 @@ def select_candidate_runner(
 
         if in_primary:
             structural_band = "PRIMARY"
-        elif in_secondary and anchored_ok:
+        elif in_secondary:
             structural_band = "SECONDARY"
         else:
             structural_band = "HARD"
@@ -220,10 +220,10 @@ def select_candidate_runner(
 
         # Rank exclusion
         if top_excl > 0 and idx <= top_excl:
-            debug.append(RunnerSelectionRow(r, idx, "HARD", st, None, -9999.0, f"excluded: top {top_excl}"))
+            debug.append(RunnerSelectionRow(r, idx, structural_band, st, None, -9999.0, f"excluded: top {top_excl}"))
             continue
         if bot_excl > 0 and (total - idx) < bot_excl:
-            debug.append(RunnerSelectionRow(r, idx, "HARD", st, None, -9999.0, f"excluded: bottom {bot_excl}"))
+            debug.append(RunnerSelectionRow(r, idx, structural_band, st, None, -9999.0, f"excluded: bottom {bot_excl}"))
             continue
 
         in_primary = primary.min <= r.best_back <= primary.max
@@ -245,9 +245,9 @@ def select_candidate_runner(
 
         # In hard band, but not in an allowed selection band
         if in_secondary and not anchored_ok:
-            debug.append(RunnerSelectionRow(r, idx, "HARD", st, None, -9999.0, "secondary not allowed (anchoring)"))
+            debug.append(RunnerSelectionRow(r, idx, structural_band, st, None, -9999.0, "secondary not allowed (anchoring)"))
         else:
-            debug.append(RunnerSelectionRow(r, idx, "HARD", st, None, -9999.0, "not in allowed band"))
+            debug.append(RunnerSelectionRow(r, idx, structural_band, st, None, -9999.0, "not in allowed band"))
 
     def _order_key(row: RunnerSelectionRow) -> tuple[int, int, float]:
         sprd = row.spread_ticks if row.spread_ticks is not None else 9999

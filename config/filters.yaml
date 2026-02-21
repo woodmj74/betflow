@@ -35,7 +35,7 @@ regions:
 structure_gates:
   anchor:
     top_n: 3
-    min_top_implied: 0.65
+    min_top_implied: 0.50
     # Meaning: sum(1/back_price) of top N <=? (or >=?) depends on rule implementation.
     # We are NOT changing logic here — just providing config in the expected place. (0.65)
 
